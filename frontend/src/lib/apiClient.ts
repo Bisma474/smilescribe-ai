@@ -89,15 +89,33 @@ export const authApi = {
 
 export interface Patient {
   id: number;
-  name: string;
+  first_name: string;
+  last_name: string;
+  dob?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  mrn?: string | null;
+  insurance_id?: string | null;
+  insurance_plan?: string | null;
+  risk_level?: string | null;
+  notes?: string | null;
+  practice_id?: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PatientCreatePayload {
+  first_name: string;
+  last_name: string;
   dob?: string;
-  meta?: string;
-  date: string;
-  initials?: string;
-  badge_text?: string;
-  badge?: string;
-  bg?: string;
-  color?: string;
+  email?: string;
+  phone?: string;
+  mrn?: string;
+  insurance_id?: string;
+  insurance_plan?: string;
+  risk_level?: string;
+  notes?: string;
 }
 
 export interface ClinicalSession {
@@ -122,9 +140,11 @@ export interface AuditLog {
 
 export const patientsApi = {
   list: () => request<Patient[]>('/patients'),
-  create: (payload: Partial<Patient>) =>
+  create: (payload: PatientCreatePayload) =>
     request<Patient>('/patients', { method: 'POST', body: JSON.stringify(payload) }),
   get: (id: number) => request<Patient>(`/patients/${id}`),
+  update: (id: number, payload: Partial<PatientCreatePayload>) =>
+    request<Patient>(`/patients/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
 };
 
 export const sessionsApi = {
