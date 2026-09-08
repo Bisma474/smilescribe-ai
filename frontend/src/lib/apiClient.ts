@@ -118,6 +118,21 @@ export interface PatientCreatePayload {
   notes?: string;
 }
 
+export interface RecentSession {
+  patient_id: number;
+  patient_name: string;
+  status: string;
+  created_at: string;
+}
+
+export interface DashboardStats {
+  today_visits: number;
+  pending_review: number;
+  revenue_suggested: number;
+  active_patients: number;
+  recent_sessions: RecentSession[];
+}
+
 export interface ClinicalSession {
   id: number;
   patient_id: number;
@@ -145,6 +160,7 @@ export const patientsApi = {
   get: (id: number) => request<Patient>(`/patients/${id}`),
   update: (id: number, payload: Partial<PatientCreatePayload>) =>
     request<Patient>(`/patients/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  dashboardStats: () => request<DashboardStats>('/patients/dashboard-stats'),
 };
 
 export const sessionsApi = {
