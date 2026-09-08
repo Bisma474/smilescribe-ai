@@ -10,7 +10,7 @@ def _try_include(module_name: str, prefix: str, tags: list) -> None:
     """Import an endpoint module and include its router; skip on ImportError.
 
     POC mode intentionally excludes DB / auth modules so the app can run
-    without bcrypt, jose, or a live Supabase connection.
+    without a live Supabase connection.
     """
     try:
         mod = __import__(f"app.api.v1.endpoints.{module_name}", fromlist=["router"])
