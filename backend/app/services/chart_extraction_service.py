@@ -49,7 +49,7 @@ def extract_chart(transcript: str, pageindex_context: str = "") -> list[dict]:
         system_msg += f"\n\nRelevant dental knowledge context:\n{pageindex_context}"
 
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         messages=[
             {"role": "system", "content": system_msg},
             {"role": "user", "content": f"Transcript:\n{transcript}"},
