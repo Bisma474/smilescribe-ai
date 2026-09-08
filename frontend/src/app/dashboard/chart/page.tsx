@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { patientsApi, sessionsApi, logsApi } from '@/lib/apiClient';
+import { patientName as formatPatientName, patientMeta as formatPatientMeta } from '@/lib/patientDisplay';
 import { useAuth } from '@/store/AuthContext';
 
 interface ToothInfo {
@@ -134,8 +135,8 @@ export default function ChartPage() {
 
         // 1. Fetch patient details
         const pt = await patientsApi.get(pId);
-        setPatientName(pt.name);
-        setPatientMeta(pt.meta || `DOB: ${pt.dob || ''} · Routine checkup`);
+        setPatientName(formatPatientName(pt));
+        setPatientMeta(formatPatientMeta(pt));
 
         // 2. Fetch session data
         const session = await sessionsApi.getActive(pId);

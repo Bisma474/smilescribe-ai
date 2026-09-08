@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { patientsApi } from '@/lib/apiClient';
+import { patientName as formatPatientName } from '@/lib/patientDisplay';
 import { setPendingRecording } from '@/lib/recordingSession';
 
 type RecorderState = 'requesting-mic' | 'recording' | 'stopping' | 'error';
@@ -34,7 +35,7 @@ export default function RecordingPage() {
 
   useEffect(() => {
     if (!patientId) return;
-    patientsApi.get(Number(patientId)).then(p => setPatientName(p.name)).catch(() => {});
+    patientsApi.get(Number(patientId)).then(p => setPatientName(formatPatientName(p))).catch(() => {});
   }, [patientId]);
 
   useEffect(() => {

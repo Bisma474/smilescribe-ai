@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { patientsApi, sessionsApi, logsApi } from '@/lib/apiClient';
+import { patientName as formatPatientName, patientMeta as formatPatientMeta } from '@/lib/patientDisplay';
 import { useAuth } from '@/store/AuthContext';
 
 interface CdtItem {
@@ -60,8 +61,8 @@ export default function BillingPage() {
 
         // 1. Fetch patient
         const pt = await patientsApi.get(pId);
-        setPatientName(pt.name);
-        setPatientMeta(pt.meta || `DOB: ${pt.dob || ''}`);
+        setPatientName(formatPatientName(pt));
+        setPatientMeta(formatPatientMeta(pt));
 
         // 2. Fetch session
         const session = await sessionsApi.getActive(pId);
