@@ -2,15 +2,18 @@
 frontend's Chart Review page expects for `clinical_entries`, and builds a
 simple template-based visit summary from those findings.
 
-This is a straightforward relabeling step — no AI is involved here. The
-mapping from confidence -> color and the summary template are deliberately
-simple for this iteration; CDT code / fee assignment is out of scope (see
-the recording-pipeline plan) and left as null/placeholder.
+This is a straightforward relabeling step — no AI is involved here for the
+shape mapping itself. CDT code + fee assignment uses a small deterministic
+keyword lookup (cdt_lookup.py), not an AI call — see that module's
+docstring for why, and its limits (not insurance-grade coding).
 """
 from typing import Any
 
+from app.services.cdt_lookup import match_cdt
 
-def _confidence_color(confidence: int) -> str:
+
+def _confidence_color(confidence: int | None) -> str:
+    confidence = confidence or 0
     if confidence >= 85:
         return "var(--teal-dark)"
     if confidence >= 50:
@@ -37,18 +40,28 @@ def map_findings_to_clinical_entries(findings: list[dict]) -> list[dict[str, Any
                 "fee": None,
                 "color": "var(--red-c)",
                 "segments": [],
+                "_is_extraction_error": True,
             })
             continue
 
         tooth = f.get("tooth_number") or "—"
-        confidence = f.get("confidence", 0)
+        confidence = f.get("confidence") or 0
+        # extract_chart's output isn't schema-validated before it reaches
+        # here, so a field can be missing, explicitly null, or (if the LLM
+        # misbehaves) a non-string value — coerce to str defensively rather
+        # than let a stray list/dict crash the whole session on re.search.
+        finding_raw = f.get("finding")
+        detail_raw = f.get("detail")
+        finding_text = finding_raw if isinstance(finding_raw, str) else (str(finding_raw) if finding_raw else "")
+        detail_text = detail_raw if isinstance(detail_raw, str) else (str(detail_raw) if detail_raw else "")
+        cdt = match_cdt(finding_text, detail_text)
         entries.append({
             "tooth": f"#{tooth}" if tooth not in ("", "ALL", "—") else tooth,
-            "label": f.get("finding", ""),
-            "detail": f.get("detail", ""),
-            "cdt": None,        # CDT auto-assignment is a future enhancement
+            "label": finding_text,
+            "detail": detail_text,
+            "cdt": cdt["code"] if cdt else None,
             "conf": confidence,
-            "fee": None,        # Fee lookup is a future enhancement
+            "fee": cdt["fee"] if cdt else None,
             "color": _confidence_color(confidence),
             "segments": [{
                 "start": f.get("char_offset_start", -1),
@@ -63,9 +76,19 @@ def build_summary_report(clinical_entries: list[dict[str, Any]]) -> dict[str, An
     """Build a simple, template-based visit summary from the mapped
     clinical entries. Not AI-generated — just a readable rollup of what was
     found, to give the Summary tab real (if basic) content instead of the
-    previous hardcoded example."""
-    findings_list = [e for e in clinical_entries if e.get("label")]
-    high_confidence = [e for e in findings_list if e.get("conf", 0) >= 85]
+    previous hardcoded example.
+
+    Every matched CDT code is a *suggestion pending dentist confirmation*,
+    never an auto-billed "completed" procedure — extraction confidence
+    measures how well the AI's text matches the transcript, not whether a
+    procedure was actually performed today (e.g. "existing restoration"
+    or a merely "possible" finding can score high confidence without any
+    procedure having happened at this visit). Auto-marking anything
+    "completed" here would risk billing for work that wasn't done."""
+    # Excludes synthetic "Extraction error" placeholders (parsing failures,
+    # not real clinical findings) — they shouldn't appear as a pending
+    # procedure for the dentist to review/bill.
+    findings_list = [e for e in clinical_entries if e.get("label") and not e.get("_is_extraction_error")]
 
     if not findings_list:
         clinical_notes = "No clinical findings were extracted from this visit's transcript."
@@ -75,14 +98,21 @@ def build_summary_report(clinical_entries: list[dict[str, Any]]) -> dict[str, An
         )
         clinical_notes = f"Findings from this visit: {notes}."
 
+    recommendations = [
+        {"desc": e["label"], "tooth": e["tooth"], "code": e.get("cdt"), "fee": e.get("fee"), "conf": e.get("conf", 0), "status": "pending_review"}
+        for e in findings_list
+    ]
+    fees = [e["fee"] for e in recommendations if e.get("fee") is not None]
+    suggested_fee_total = sum(fees) if fees else None
+
     return {
         "chief_complaint": None,
         "clinical_notes": clinical_notes,
+        # No "procedures" list — nothing is auto-confirmed as billed. The
+        # dentist reviews `recommendations` and confirms/bills manually.
         "procedures": [],
-        "recommendations": [
-            {"desc": e["label"], "tooth": e["tooth"], "code": None, "fee": None, "status": "pending"}
-            for e in findings_list
-            if e not in high_confidence
-        ],
-        "est_recovery": None,
+        "recommendations": recommendations,
+        # Sum of ALL suggested CDT fees pending review (not a promise of
+        # collected revenue — every entry here still needs confirmation).
+        "est_recovery": suggested_fee_total,
     }
