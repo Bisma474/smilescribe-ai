@@ -12,13 +12,6 @@ interface CdtItem {
   fee: number;
 }
 
-const DEFAULT_CDT_LIST: CdtItem[] = [
-  {code:'D4910',desc:'Periodontal maintenance',conf:97,fee:148},
-  {code:'D1110',desc:'Prophylaxis — adult',conf:94,fee:95},
-  {code:'D1206',desc:'Topical fluoride varnish',conf:99,fee:48},
-  {code:'D1330',desc:'Oral hygiene instruction',conf:91,fee:29},
-];
-
 export default function BillingPage() {
   const router = useRouter();
   const { user } = useAuth();
@@ -29,8 +22,7 @@ export default function BillingPage() {
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [summaryReport, setSummaryReport] = useState<any>(null);
 
-  const [cdtList, setCdtList] = useState<CdtItem[]>(DEFAULT_CDT_LIST);
-  const [showD0120Alert, setShowD0120Alert] = useState(true);
+  const [cdtList, setCdtList] = useState<CdtItem[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   
   const [loading, setLoading] = useState(false);
@@ -70,21 +62,26 @@ export default function BillingPage() {
         
         if (session.summary_report) {
           setSummaryReport(session.summary_report);
-          
-          // Map procedures to cdtList
-          if (session.summary_report.procedures) {
-            const mapped: CdtItem[] = session.summary_report.procedures.map((p: any) => ({
-              code: p.code,
-              desc: p.desc || p.description || 'Dental procedure',
-              conf: p.conf || p.confidence || 95,
-              fee: p.fee || 0
+
+          // CDT codes come from the AI-suggested `recommendations` (every
+          // entry is pending dentist confirmation — nothing here has been
+          // auto-billed). Only entries with an actual matched code are
+          // shown; findings with no CDT match are visible on the Chart
+          // page's Summary tab but don't appear as a billable line here.
+          const recommendations = session.summary_report.recommendations || [];
+          const mapped: CdtItem[] = recommendations
+            .filter((r: any) => r.code)
+            .map((r: any) => ({
+              code: r.code,
+              desc: r.desc || 'Dental finding',
+              conf: r.conf || 0,
+              fee: r.fee || 0
             }));
-            setCdtList(mapped);
-          }
+          setCdtList(mapped);
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error('Failed to load billing data:', err);
-        // Do not overwrite cdtList with empty array; keep defaults
+        setError(err instanceof Error ? err.message : 'Failed to load billing data.');
       } finally {
         setLoading(false);
       }
@@ -103,57 +100,6 @@ export default function BillingPage() {
     }
   }, [toastMessage]);
 
-  const handleAddD0120 = async () => {
-    if (submitting) return;
-    
-    // Check if already added to avoid duplicates
-    if (!cdtList.some(c => c.code === 'D0120')) {
-      const d0120Item: CdtItem = {
-        code: 'D0120',
-        desc: 'Periodic oral evaluation — established patient',
-        conf: 95,
-        fee: 55
-      };
-      
-      const updatedList = [...cdtList, d0120Item];
-      setCdtList(updatedList);
-      setToastMessage('CDT Code D0120 added to visit claim!');
-
-      // Save updated procedures to backend
-      if (sessionId && summaryReport) {
-        try {
-          const updatedSummary = {
-            ...summaryReport,
-            procedures: [
-              ...summaryReport.procedures,
-              { code: 'D0120', desc: 'Periodic oral evaluation', fee: 55, status: 'completed', confidence: 95 }
-            ]
-          };
-          setSummaryReport(updatedSummary);
-          await sessionsApi.update(sessionId, { summary_report: updatedSummary });
-
-          // HIPAA log
-          try {
-            await logsApi.create({
-              action: 'Billing',
-              user_name: user?.full_name || 'Dr. Alice Kim',
-              details: `Added periodic exam CDT code (D0120) to ${patientName} claim`
-            });
-          } catch (logErr) {
-            console.warn('Failed to write audit log:', logErr);
-          }
-        } catch (err) {
-          console.warn('Failed to sync added code to database:', err);
-        }
-      }
-    }
-    setShowD0120Alert(false);
-  };
-
-  const handleDismissAlert = () => {
-    setShowD0120Alert(false);
-    setToastMessage('Revenue flag dismissed.');
-  };
 
   const handleAction = async (message: string, actionType: string) => {
     setToastMessage(message);
@@ -194,6 +140,7 @@ export default function BillingPage() {
   };
 
   const totalFee = cdtList.reduce((acc, item) => acc + item.fee, 0);
+  const unmatchedFindingsCount = (summaryReport?.recommendations || []).filter((r: any) => !r.code).length;
 
   return (
     <div>
@@ -252,7 +199,7 @@ export default function BillingPage() {
           <div className="stat-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:'20px'}}>
             <div className="stat-card"><div className="stat-val teal">${totalFee}</div><div className="stat-lbl">Est. Value</div></div>
             <div className="stat-card"><div className="stat-val">{cdtList.length}</div><div className="stat-lbl">CDT Codes</div></div>
-            <div className="stat-card"><div className="stat-val warn">{showD0120Alert ? 1 : 0}</div><div className="stat-lbl">Flag</div></div>
+            <div className="stat-card"><div className="stat-val warn">{unmatchedFindingsCount}</div><div className="stat-lbl">Needs Coding</div></div>
           </div>
           
           <div className="section-label mb-12">Assigned CDT Codes</div>
@@ -274,7 +221,7 @@ export default function BillingPage() {
             </div>
             
             {cdtList.map((c,i) => (
-              <div key={c.code} style={{
+              <div key={`${c.code}-${i}`} style={{
                 display:'grid',
                 gridTemplateColumns:'80px 1fr 100px 60px',
                 alignItems:'center',
@@ -302,57 +249,11 @@ export default function BillingPage() {
         </div>
 
         <div>
-          {showD0120Alert && (
-            <div>
-              <div className="section-label mb-12">Revenue Recovery Flags</div>
-              <div className="alert-card warn" style={{
-                marginBottom:'12px',
-                background:'#FEF8F0',
-                border:'1px solid #FCE4C3',
-                borderRadius:'12px',
-                padding:'14px',
-                display:'flex',
-                gap:'12px'
-              }}>
-                <div className="alert-icon warn" style={{color:'#D97706'}}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                </div>
-                <div style={{flex:1}}>
-                  <div className="alert-title warn" style={{fontSize:'13px',fontWeight:'700',color:'#92400E',marginBottom:'4px'}}>D0120 — Periodic exam detected</div>
-                  <div className="alert-text" style={{fontSize:'12px',color:'#B45309'}}>Exam was performed per transcript but not yet coded. Est. value: $55</div>
-                  <div style={{display:'flex',gap:'8px',marginTop:'10px',flexWrap:'wrap'}}>
-                    <button className="btn-sm btn-teal" style={{fontSize:'11px',padding:'4px 10px',background:'var(--teal)'}} onClick={handleAddD0120}>+ Add D0120</button>
-                    <button className="btn-sm btn-ghost" style={{fontSize:'11px',padding:'4px 10px'}} onClick={handleDismissAlert}>Dismiss</button>
-                  </div>
-                </div>
-              </div>
+          {cdtList.length === 0 && (
+            <div style={{fontSize:'12px',color:'var(--ink3)',fontStyle:'italic',padding:'12px 0'}}>
+              No AI-suggested CDT codes for this visit yet — record a session to generate findings, or add codes manually below.
             </div>
           )}
-
-          <div className="section-label mb-12 mt-20">Monthly Overview</div>
-          <div className="card-sm mb-12" style={{
-            background:'var(--white)',
-            border:'1px solid var(--border)',
-            borderRadius:'12px',
-            padding:'14px'
-          }}>
-            <div style={{fontSize:'12px',fontWeight:600,color:'var(--navy)',marginBottom:'10px'}}>April 2025 Recovery</div>
-            {[
-              {label:'D1330 OHI underbilled x6',val:'$174'},
-              {label:'D4910 missing x 2 visits',val:'$296'},
-              {label:'D0120 missed x 3 visits',val:'$165'},
-            ].map(r => (
-              <div key={r.label} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px'}}>
-                <span style={{fontSize:'11px',color:'var(--ink3)'}}>{r.label}</span>
-                <span style={{fontSize:'12px',fontWeight:700,color:'var(--teal-dark)'}}>{r.val}</span>
-              </div>
-            ))}
-            <div className="divider" style={{margin:'8px 0',borderBottom:'1px solid var(--border)'}}/>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              <span style={{fontSize:'12px',fontWeight:700,color:'var(--navy)'}}>Total Recoverable</span>
-              <span style={{fontFamily:'var(--font-display)',fontSize:'18px',color:'var(--teal-dark)'}}>$635</span>
-            </div>
-          </div>
 
           <div style={{display:'flex',flexDirection:'column',gap:'8px',marginTop:'20px'}}>
             <button className="btn-primary" disabled={submitting} onClick={handleSubmitClaim}>
