@@ -70,6 +70,13 @@ vi.mock('@/lib/apiClient', async (importOriginal) => {
         Object.assign(p, payload);
         return p;
       }),
+      dashboardStats: vi.fn(async () => ({
+        today_visits: 0,
+        pending_review: 0,
+        revenue_suggested: 0,
+        active_patients: patientsStore.length,
+        recent_sessions: [],
+      })),
     },
   };
 });
@@ -150,33 +157,20 @@ describe('🔒 DentalScribeAI — Aggressive Frontend Unit Test Suite', () => {
   });
 
   describe('2. Dashboard Page Interaction Tests', () => {
-    it('should navigate to Chart Review when reviewing Missed D4910 alert', () => {
+    // Dashboard now fetches real aggregate stats from
+    // patientsApi.dashboardStats() instead of rendering hardcoded
+    // schedule/alert content. sessionsApi is left as the real
+    // (network-failing in jsdom) implementation, so this only exercises
+    // the honest empty state — no fabricated patients/alerts exist to
+    // click through anymore.
+    it('should show a real empty state and real stat cards when no session data has loaded', async () => {
       render(<DashboardPage />);
-      mockPush.mockClear();
-      const reviewBtns = screen.getAllByRole('button', { name: /review →/i });
-      
-      // Click first review button (Missed D4910)
-      fireEvent.click(reviewBtns[0]);
-      expect(mockPush).toHaveBeenCalledWith('/dashboard/chart');
-    });
-
-    it('should navigate to Billing when reviewing D1330 underbilled alert', () => {
-      render(<DashboardPage />);
-      mockPush.mockClear();
-      const reviewBtns = screen.getAllByRole('button', { name: /review →/i });
-      
-      // Click second review button (underbilled)
-      fireEvent.click(reviewBtns[1]);
-      expect(mockPush).toHaveBeenCalledWith('/dashboard/billing');
-    });
-
-    it('should navigate to patient recording when clicking Marcus Torres schedule card', () => {
-      render(<DashboardPage />);
-      mockPush.mockClear();
-      const marcusCard = screen.getByText('Marcus Torres');
-      
-      fireEvent.click(marcusCard.closest('.patient-card')!);
-      expect(mockPush).toHaveBeenCalledWith('/dashboard/recording');
+      expect(await screen.findByText(/no recordings yet/i)).toBeDefined();
+      expect(screen.getByText("Today's Visits")).toBeDefined();
+      expect(screen.getByText('Active Patients')).toBeDefined();
+      // The old hardcoded "Revenue Flags" cards and CDT Accuracy stat are gone.
+      expect(screen.queryByText('CDT Accuracy')).toBeNull();
+      expect(screen.queryByText(/Missed D4910/i)).toBeNull();
     });
   });
 
