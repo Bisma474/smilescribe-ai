@@ -3,8 +3,11 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+  // FormData bodies (file uploads) must NOT get an explicit Content-Type —
+  // the browser sets one with the correct multipart boundary itself.
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers as Record<string, string>),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -105,6 +108,7 @@ export interface ClinicalSession {
   perio_data?: any;
   clinical_entries?: any[];
   summary_report?: any;
+  error_message?: string | null;
   created_at: string;
 }
 
@@ -129,6 +133,28 @@ export const sessionsApi = {
     request<ClinicalSession>('/transcription/session', { method: 'POST', body: JSON.stringify(payload) }),
   update: (sessionId: number, payload: Partial<ClinicalSession>) =>
     request<ClinicalSession>(`/notes/session/${sessionId}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  // Uploads recorded audio and kicks off the real transcribe -> extract ->
+  // persist pipeline in the background. Returns immediately with the
+  // session in status="processing" — poll getActive() until it's done.
+  startRecordingJob: (patientId: number, audioBlob: Blob) => {
+    // Name the file with the extension matching its actual MIME type — the
+    // backend infers audio format from the filename extension.
+    const extensionByType: Record<string, string> = {
+      'audio/webm': 'webm',
+      'audio/ogg': 'ogg',
+      'audio/mp4': 'm4a',
+      'audio/wav': 'wav',
+      'audio/mpeg': 'mp3',
+    };
+    const baseType = audioBlob.type.split(';')[0];
+    const extension = extensionByType[baseType] || 'webm';
+    const formData = new FormData();
+    formData.append('file', audioBlob, `recording.${extension}`);
+    return request<ClinicalSession>(`/transcription/session/${patientId}/record`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
 };
 
 export const logsApi = {
