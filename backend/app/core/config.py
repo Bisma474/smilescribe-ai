@@ -35,9 +35,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql://postgres:password@db.xxxx.supabase.co:5432/postgres"
 
     # ── Auth ─────────────────────────────────────────────────────────────────
-    SECRET_KEY: str = "change-me-in-production-use-openssl-rand-hex-32"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # Auth is delegated to Supabase Auth — token issuance/verification and
+    # expiry are managed by Supabase, not by this app.
 
     # ── CORS ─────────────────────────────────────────────────────────────────
     # Read as raw string from env, then parse in property.

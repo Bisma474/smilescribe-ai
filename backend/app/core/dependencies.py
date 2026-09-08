@@ -1,8 +1,10 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from supabase_auth.errors import AuthApiError
 from sqlalchemy.orm import Session
-from app.core.security import decode_token
+from app.core.profile_sync import get_or_create_profile, UnclaimedLegacyAccountError
 from app.db.session import get_db
+from app.db.supabase_client import get_supabase
 from app.models.user import User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -17,38 +19,32 @@ def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    payload = decode_token(token)
-    if payload is None:
-        raise credentials_exc
-    if payload.get("type") == "refresh":
-        raise credentials_exc  # refresh tokens not valid for API access
 
-    user_id: str = payload.get("sub")
-    if user_id is None:
-        raise credentials_exc
-
+    supabase = get_supabase()
     try:
-        user = db.query(User).filter(User.id == int(user_id)).first()
-    except Exception as e:
-        user = None
-        print(f"Database offline or query failed in get_current_user: {e}")
+        result = supabase.auth.get_user(token)
+    except AuthApiError:
+        raise credentials_exc
 
-    # Fallback to mock user if DB is offline or not found
-    if not user and user_id == "999":
-        user = User(
-            id=999,
-            email="dr.kim@brightsmile.com",
-            full_name="Dr. Alice Kim",
-            role="dentist",
-            practice_name="Bright Smile Dental",
-            is_active=True,
-            is_verified=True,
+    if result is None or result.user is None:
+        raise credentials_exc
+
+    auth_user = result.user
+    # Self-heal: create a local profile row for this Supabase Auth identity
+    # if it doesn't have one yet (e.g. a user created directly via the
+    # Supabase dashboard). Deliberately does NOT auto-link to an existing
+    # unclaimed row by email — see UnclaimedLegacyAccountError.
+    try:
+        user = get_or_create_profile(db, auth_user.id, auth_user.email)
+    except UnclaimedLegacyAccountError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This email is linked to an existing account. Please contact support to migrate it.",
         )
 
-    if user is None or not user.is_active:
+    if not user.is_active:
         raise credentials_exc
     return user
-
 
 
 def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:

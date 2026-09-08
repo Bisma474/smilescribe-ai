@@ -14,8 +14,7 @@ pageindex>=0.1.0
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.9
 
-# Auth (needed for /auth, /patients, /transcription, /notes, /audit-logs)
-passlib[bcrypt]>=1.7.4
-bcrypt>=4.0.0
-python-jose[cryptography]>=3.3.0
+# Auth — Supabase Auth is the identity provider; the backend verifies
+# Supabase-issued JWTs and talks to Supabase Auth via supabase-py.
+supabase>=2.9.0
 email-validator>=2.0.0
