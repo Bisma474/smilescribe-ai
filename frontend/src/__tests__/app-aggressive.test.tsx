@@ -224,14 +224,17 @@ describe('🔒 DentalScribeAI — Aggressive Frontend Unit Test Suite', () => {
     it('should change active tab when clicking other subtabs', () => {
       render(<ChartPage />);
 
-      // Switch to Clinical Entries
+      // Switch to Clinical Entries — with no session data loaded (no backend
+      // in this test environment), the real empty state renders instead of
+      // hardcoded mock findings.
       fireEvent.click(screen.getByRole('button', { name: /clinical entries/i }));
-      expect(screen.getByText('AI-extracted chart entries from transcript — hover an entry to highlight supporting sentences in the transcript panel')).toBeDefined();
+      expect(screen.getByText(/No clinical findings yet/)).toBeDefined();
 
-      // Switch to Summary Report
+      // Switch to Summary Report — same: no session data means the real
+      // "no summary yet" empty state, not a fabricated report.
       fireEvent.click(screen.getByRole('button', { name: /summary report/i }));
       expect(screen.getByText('Patient Clinical Summary Report')).toBeDefined();
-      expect(screen.getByText('Total Billing Recovery')).toBeDefined();
+      expect(screen.getByText(/No summary yet/)).toBeDefined();
     });
 
     it('should allow selecting different teeth and show corresponding AI findings', () => {
