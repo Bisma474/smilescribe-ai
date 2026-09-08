@@ -246,22 +246,15 @@ describe('🔒 DentalScribeAI — Aggressive Frontend Unit Test Suite', () => {
   });
 
   describe('4. Billing & CDT Code Stateful Action Tests', () => {
-    it('should toggle and append D0120 code, recalculate total fee and subtotal, and dismiss banner', () => {
+    it('should show a real empty state when no session data has loaded', () => {
       render(<BillingPage />);
 
-      // Initial subtotal should be $320
-      expect(screen.getAllByText('$320')).toBeDefined();
-      expect(screen.getByText('D0120 — Periodic exam detected')).toBeDefined();
-
-      // Add D0120
-      fireEvent.click(screen.getByRole('button', { name: '+ Add D0120' }));
-
-      // Subtotal should be updated to $375 ($320 + $55)
-      expect(screen.getAllByText('$375')).toBeDefined();
-      // Code should appear in codes list
-      expect(screen.getByText('D0120')).toBeDefined();
-      // Flag card should be hidden
-      expect(screen.queryByText('D0120 — Periodic exam detected')).toBeNull();
+      // No backend in this test environment — CDT codes now come from the
+      // real session's AI-suggested recommendations, so with no session
+      // loaded the page shows an honest empty state instead of a
+      // hardcoded demo CDT list.
+      expect(screen.getByText(/No AI-suggested CDT codes for this visit yet/)).toBeDefined();
+      expect(screen.getAllByText('$0')).toBeDefined();
     });
 
     it('should show toast notifications for submit/export/save actions', () => {
