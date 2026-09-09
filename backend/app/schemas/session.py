@@ -22,6 +22,7 @@ class ClinicalSessionUpdate(BaseModel):
 
 class ClinicalSessionOut(ClinicalSessionBase):
     id: int
+    error_message: str | None = None
     created_at: datetime
 
     class Config:

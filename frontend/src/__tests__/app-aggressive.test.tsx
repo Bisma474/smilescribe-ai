@@ -1,6 +1,15 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import React from 'react';
+
+// This project's Vitest config has no setupFiles, so @testing-library/
+// react's automatic per-test cleanup isn't wired up — without this,
+// render() from an earlier test leaves its DOM mounted, and later
+// getByText/findByText queries can match leftover elements from previous
+// tests (or throw on multiple matches).
+afterEach(() => {
+  cleanup();
+});
 
 // Mock Router and AuthContext to decouple from server / context providers
 const mockPush = vi.fn();
@@ -25,6 +34,52 @@ vi.mock('@/store/AuthContext', () => ({
     isAuthenticated: false,
   }),
 }));
+
+// Real backend-less test environment: only patientsApi is mocked (as an
+// in-memory store) so PatientsPage's real fetch/create flow is exercised
+// without a live server. Other exports (sessionsApi, logsApi, request) stay
+// real — their network calls fail in jsdom, which other tests rely on to
+// exercise real error/empty states.
+let patientsStore: any[] = [];
+let nextPatientId = 1000;
+function resetPatientsStore() {
+  patientsStore = [];
+  nextPatientId = 1000;
+}
+vi.mock('@/lib/apiClient', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/apiClient')>();
+  return {
+    ...actual,
+    patientsApi: {
+      list: vi.fn(async () => patientsStore),
+      get: vi.fn(async (id: number) => patientsStore.find(p => p.id === id)),
+      create: vi.fn(async (payload: any) => {
+        const created = {
+          id: nextPatientId++,
+          practice_id: 1,
+          is_active: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          ...payload,
+        };
+        patientsStore.push(created);
+        return created;
+      }),
+      update: vi.fn(async (id: number, payload: any) => {
+        const p = patientsStore.find(pt => pt.id === id);
+        Object.assign(p, payload);
+        return p;
+      }),
+      dashboardStats: vi.fn(async () => ({
+        today_visits: 0,
+        pending_review: 0,
+        revenue_suggested: 0,
+        active_patients: patientsStore.length,
+        recent_sessions: [],
+      })),
+    },
+  };
+});
 
 import LoginPage from '../components/features/auth/LoginPage';
 import DashboardPage from '../app/dashboard/page';
@@ -102,43 +157,50 @@ describe('🔒 DentalScribeAI — Aggressive Frontend Unit Test Suite', () => {
   });
 
   describe('2. Dashboard Page Interaction Tests', () => {
-    it('should navigate to Chart Review when reviewing Missed D4910 alert', () => {
+    // Dashboard now fetches real aggregate stats from
+    // patientsApi.dashboardStats() instead of rendering hardcoded
+    // schedule/alert content. sessionsApi is left as the real
+    // (network-failing in jsdom) implementation, so this only exercises
+    // the honest empty state — no fabricated patients/alerts exist to
+    // click through anymore.
+    it('should show a real empty state and real stat cards when no session data has loaded', async () => {
       render(<DashboardPage />);
-      mockPush.mockClear();
-      const reviewBtns = screen.getAllByRole('button', { name: /review →/i });
-      
-      // Click first review button (Missed D4910)
-      fireEvent.click(reviewBtns[0]);
-      expect(mockPush).toHaveBeenCalledWith('/dashboard/chart');
-    });
-
-    it('should navigate to Billing when reviewing D1330 underbilled alert', () => {
-      render(<DashboardPage />);
-      mockPush.mockClear();
-      const reviewBtns = screen.getAllByRole('button', { name: /review →/i });
-      
-      // Click second review button (underbilled)
-      fireEvent.click(reviewBtns[1]);
-      expect(mockPush).toHaveBeenCalledWith('/dashboard/billing');
-    });
-
-    it('should navigate to patient recording when clicking Marcus Torres schedule card', () => {
-      render(<DashboardPage />);
-      mockPush.mockClear();
-      const marcusCard = screen.getByText('Marcus Torres');
-      
-      fireEvent.click(marcusCard.closest('.patient-card')!);
-      expect(mockPush).toHaveBeenCalledWith('/dashboard/recording');
+      expect(await screen.findByText(/no recordings yet/i)).toBeDefined();
+      expect(screen.getByText("Today's Visits")).toBeDefined();
+      expect(screen.getByText('Active Patients')).toBeDefined();
+      // The old hardcoded "Revenue Flags" cards and CDT Accuracy stat are gone.
+      expect(screen.queryByText('CDT Accuracy')).toBeNull();
+      expect(screen.queryByText(/Missed D4910/i)).toBeNull();
     });
   });
 
   describe('3. Patients Page Stateful Filter & Form Tests', () => {
-    it('should filter patients dynamically by search query', () => {
+    // Patients are now real, persisted records (no more hardcoded seed
+    // list) — each test adds its own patients via the real Add Patient
+    // form flow (backed by the in-memory patientsApi mock above) rather
+    // than relying on fake pre-seeded names.
+    // Waits for the component's mount-time fetchPatients() to resolve
+    // before any Add Patient interaction — otherwise the mount fetch's
+    // (empty) result could resolve after an add and wipe it back out.
+    const waitForInitialLoad = () => screen.findByText('No patients match your search or active filter.');
+
+    const addPatient = async (fullName: string, notes?: string) => {
+      fireEvent.click(screen.getByRole('button', { name: /\+ add patient/i }));
+      fireEvent.change(screen.getByPlaceholderText('John Doe'), { target: { value: fullName } });
+      if (notes) {
+        fireEvent.change(screen.getByPlaceholderText('Cleaning / Scaling'), { target: { value: notes } });
+      }
+      fireEvent.click(screen.getByRole('button', { name: 'Create Profile' }));
+      await screen.findByText(fullName);
+    };
+
+    it('should filter patients dynamically by search query', async () => {
+      resetPatientsStore();
       render(<PatientsPage />);
-      
-      // Initially show all patients (e.g. Sarah, Marcus, etc.)
-      expect(screen.getByText('Sarah Johnson')).toBeDefined();
-      expect(screen.getByText('Marcus Torres')).toBeDefined();
+      await waitForInitialLoad();
+
+      await addPatient('Sarah Johnson');
+      await addPatient('Marcus Torres');
 
       // Type search filter
       const searchInput = screen.getByPlaceholderText('Search by name, DOB, or patient ID…') as HTMLInputElement;
@@ -148,58 +210,45 @@ describe('🔒 DentalScribeAI — Aggressive Frontend Unit Test Suite', () => {
       expect(screen.queryByText('Marcus Torres')).toBeNull();
     });
 
-    it('should filter patients dynamically by tab chips', () => {
+    it('should filter patients dynamically by tab chips', async () => {
+      resetPatientsStore();
       render(<PatientsPage />);
+      await waitForInitialLoad();
 
-      // Initially show all patients
-      expect(screen.getByText('Sarah Johnson')).toBeDefined();
-      expect(screen.getByText('Julia Lee')).toBeDefined();
+      // "Perio" is a real filter — it matches the notes field, which the
+      // Add Patient form's "Reason for Visit" input actually writes to.
+      await addPatient('Sarah Johnson', 'Routine check-up');
+      await addPatient('Julia Lee', 'Perio maintenance');
 
-      // Click High Risk chip
-      fireEvent.click(screen.getByRole('button', { name: 'High Risk' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Perio' }));
       expect(screen.getByText('Julia Lee')).toBeDefined();
       expect(screen.queryByText('Sarah Johnson')).toBeNull();
     });
 
-    it('should show form and dynamically add a new patient to list', () => {
+    it('should show form and add a new patient to the list', async () => {
+      resetPatientsStore();
       render(<PatientsPage />);
-      
+      await waitForInitialLoad();
+
       expect(screen.queryByText('John TestPatient')).toBeNull();
 
-      // Open Form Drawer
-      fireEvent.click(screen.getByRole('button', { name: /\+ add patient/i }));
-      expect(screen.getByText('Add New Patient Profile')).toBeDefined();
+      await addPatient('John TestPatient', 'Implant consult');
 
-      // Fill inputs
-      fireEvent.change(screen.getByPlaceholderText('John Doe'), { target: { value: 'John TestPatient' } });
-      fireEvent.change(screen.getByPlaceholderText('Cleaning / Scaling'), { target: { value: 'Implant consult' } });
-
-      // Submit
-      fireEvent.click(screen.getByRole('button', { name: 'Create Profile' }));
-
-      // Verify patient is added
       expect(screen.getByText('John TestPatient')).toBeDefined();
-      expect(screen.getByText(/Implant consult/)).toBeDefined();
+      expect(screen.getByText('Implant consult')).toBeDefined();
     });
   });
 
   describe('4. Billing & CDT Code Stateful Action Tests', () => {
-    it('should toggle and append D0120 code, recalculate total fee and subtotal, and dismiss banner', () => {
+    it('should show a real empty state when no session data has loaded', () => {
       render(<BillingPage />);
 
-      // Initial subtotal should be $320
-      expect(screen.getAllByText('$320')).toBeDefined();
-      expect(screen.getByText('D0120 — Periodic exam detected')).toBeDefined();
-
-      // Add D0120
-      fireEvent.click(screen.getByRole('button', { name: '+ Add D0120' }));
-
-      // Subtotal should be updated to $375 ($320 + $55)
-      expect(screen.getAllByText('$375')).toBeDefined();
-      // Code should appear in codes list
-      expect(screen.getByText('D0120')).toBeDefined();
-      // Flag card should be hidden
-      expect(screen.queryByText('D0120 — Periodic exam detected')).toBeNull();
+      // No backend in this test environment — CDT codes now come from the
+      // real session's AI-suggested recommendations, so with no session
+      // loaded the page shows an honest empty state instead of a
+      // hardcoded demo CDT list.
+      expect(screen.getByText(/No AI-suggested CDT codes for this visit yet/)).toBeDefined();
+      expect(screen.getAllByText('$0')).toBeDefined();
     });
 
     it('should show toast notifications for submit/export/save actions', () => {
@@ -224,14 +273,17 @@ describe('🔒 DentalScribeAI — Aggressive Frontend Unit Test Suite', () => {
     it('should change active tab when clicking other subtabs', () => {
       render(<ChartPage />);
 
-      // Switch to Clinical Entries
+      // Switch to Clinical Entries — with no session data loaded (no backend
+      // in this test environment), the real empty state renders instead of
+      // hardcoded mock findings.
       fireEvent.click(screen.getByRole('button', { name: /clinical entries/i }));
-      expect(screen.getByText('AI-extracted chart entries from transcript — hover an entry to highlight supporting sentences in the transcript panel')).toBeDefined();
+      expect(screen.getByText(/No clinical findings yet/)).toBeDefined();
 
-      // Switch to Summary Report
+      // Switch to Summary Report — same: no session data means the real
+      // "no summary yet" empty state, not a fabricated report.
       fireEvent.click(screen.getByRole('button', { name: /summary report/i }));
       expect(screen.getByText('Patient Clinical Summary Report')).toBeDefined();
-      expect(screen.getByText('Total Billing Recovery')).toBeDefined();
+      expect(screen.getByText(/No summary yet/)).toBeDefined();
     });
 
     it('should allow selecting different teeth and show corresponding AI findings', () => {

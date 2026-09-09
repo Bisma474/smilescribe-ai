@@ -1,7 +1,8 @@
 'use client';
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { patientsApi, sessionsApi, logsApi } from '@/lib/apiClient';
+import { patientName as formatPatientName, patientMeta as formatPatientMeta } from '@/lib/patientDisplay';
 import { useAuth } from '@/store/AuthContext';
 
 interface ToothInfo {
@@ -64,44 +65,24 @@ const generateDefaultPerioData = (): Record<number, ToothInfo> => {
 
 const TABS = ['Perio Chart', 'Clinical Entries', 'Summary'];
 
-const ENTRIES = [
-  { tooth:'#14', label:'Periodontal maintenance', detail:'Probing: 3-3-4 buccal · 3-4-3 lingual · BOP at mesial & distolingual', cdt:'D4910', conf:97, fee:148, color:'var(--orange-c)', transcriptIdx:3 },
-  { tooth:'#3', label:'Calculus removal — supragingival scaling', detail:'Scaling performed, all deposits removed', cdt:'D1110', conf:94, fee:95, color:'var(--teal-dark)', transcriptIdx:7 },
-  { tooth:'ALL', label:'Fluoride varnish applied', detail:'5% NaF varnish · all surfaces · post-scaling', cdt:'D1206', conf:99, fee:48, color:'var(--teal-dark)', transcriptIdx:8 },
-  { tooth:'OHI', label:'Oral hygiene instruction', detail:'Modified Bass brushing technique · interproximal care reviewed', cdt:'D1330', conf:91, fee:29, color:'var(--teal-dark)', transcriptIdx:8 },
-  { tooth:'#32', label:'Deep pocketing — active disease', detail:'Probing 5mm+ at multiple sites · BOP positive · suppuration noted', cdt:'D4341', conf:88, fee:180, color:'var(--red-c)', transcriptIdx:5 },
-];
+interface ClinicalEntry {
+  tooth: string;
+  label: string;
+  detail: string;
+  cdt: string | null;
+  conf: number;
+  fee: number | null;
+  color: string;
+  segments?: { start: number; end: number; quote: string }[];
+}
 
-const TRANSCRIPT = [
-  { sp:'DR', text:"Marcus, let's get started with the full periodontal charting today." },
-  { sp:'DR', text:"I'll check your probing depths first at six sites per tooth." },
-  { sp:'PT', text:"Is that going to be the same as last time? I've been flossing more." },
-  { sp:'DR', text:"Let's see — tooth fourteen buccal: three, three, four. Mesial four millimeters. Distolingual is five millimeters at fourteen — I'm noting bleeding on probing there." },
-  { sp:'PT', text:"Is that bleeding a bad sign?" },
-  { sp:'DR', text:"It indicates active inflammation. Your probing depths have improved from four-to-five down to three-to-four since February — that's real progress from the perio maintenance." },
-  { sp:'PT', text:"That's good to hear, Doctor." },
-  { sp:'DR', text:"Moving to tooth three — buccal two, three, three. Calculus deposits on the lingual, I'll remove those now." },
-  { sp:'DR', text:"After we finish scaling I'll apply fluoride varnish on all surfaces, and we'll go over brushing technique — I want to reinforce the modified Bass method." },
-];
-
-const SUMMARY_TEXT = `Patient: Marcus Torres
-Date: April 22, 2025
-Duration: 17m 04s
-
-Procedures Performed:
-1. Periodontal evaluation — probing depths recorded, BOP noted at #14
-2. Full mouth scaling — calculus removed, all deposits eliminated
-3. Fluoride varnish application — 5% NaF on all surfaces
-4. Oral hygiene instruction — modified Bass technique reviewed
-
-Findings:
-- Moderate generalized calculus
-- Localized deep pocketing #32 (5mm+)
-- Improving perio status compared to Feb visit
-- No recurrent caries detected on existing restorations
-
-CDT Codes: D4910, D1110, D1206, D1330, D4341
-Total Est. Fee: $500`;
+interface SummaryReport {
+  chief_complaint?: string | null;
+  clinical_notes?: string;
+  procedures?: { code: string | null; desc: string; fee: number | null; status: string }[];
+  recommendations?: { code: string | null; desc: string; fee: number | null; status: string; tooth?: string }[];
+  est_recovery?: number | null;
+}
 
 export default function ChartPage() {
   const router = useRouter();
@@ -114,8 +95,6 @@ export default function ChartPage() {
   
   const [activeTab, setActiveTab] = useState<'perio' | 'entries' | 'summary'>('perio');
   const [selectedTooth, setSelectedTooth] = useState<number>(14);
-  const [hoveredEntry, setHoveredEntry] = useState<string | null>(null);
-  const [hoveredSegment, setHoveredSegment] = useState<number | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,6 +102,13 @@ export default function ChartPage() {
 
   // Perio data state
   const [perioData, setPerioData] = useState<Record<number, ToothInfo>>(() => generateDefaultPerioData());
+
+  // Real session data — transcript, AI-extracted clinical entries, summary
+  const [transcript, setTranscript] = useState<string>('');
+  const [clinicalEntries, setClinicalEntries] = useState<ClinicalEntry[]>([]);
+  const [summaryReport, setSummaryReport] = useState<SummaryReport | null>(null);
+  const [hoveredQuote, setHoveredQuote] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     // Read patientId from URL parameters safely in browser
@@ -149,13 +135,13 @@ export default function ChartPage() {
 
         // 1. Fetch patient details
         const pt = await patientsApi.get(pId);
-        setPatientName(pt.name);
-        setPatientMeta(pt.meta || `DOB: ${pt.dob || ''} · Routine checkup`);
+        setPatientName(formatPatientName(pt));
+        setPatientMeta(formatPatientMeta(pt));
 
         // 2. Fetch session data
         const session = await sessionsApi.getActive(pId);
         setSessionId(session.id);
-        
+
         if (session.perio_data) {
           // Merge incoming data with default to guarantee 32 teeth exist
           const merged = generateDefaultPerioData();
@@ -167,9 +153,22 @@ export default function ChartPage() {
           setPerioData(initial);
           await sessionsApi.update(session.id, { perio_data: initial });
         }
-      } catch (err: any) {
+
+        setTranscript(session.transcript || '');
+        setClinicalEntries((session.clinical_entries as ClinicalEntry[]) || []);
+        setSummaryReport((session.summary_report as SummaryReport) || null);
+
+        if (session.status === 'error') {
+          setError(session.error_message || 'The last recording failed to process.');
+        } else if (session.status === 'processing') {
+          // A recording is still being transcribed/analyzed in the
+          // background — whatever transcript/entries/summary are shown
+          // below are from the previous visit, not this one yet.
+          setIsProcessing(true);
+        }
+      } catch (err) {
         console.error('Failed to load chart data:', err);
-        // Do not overwrite local perioData state to keep mock working
+        setError(err instanceof Error ? err.message : 'Failed to load chart data.');
       } finally {
         setLoading(false);
       }
@@ -201,35 +200,6 @@ export default function ChartPage() {
       setSaveStatus('error');
     }
   };
-
-  // Clinical entries list
-  const clinicalEntries = useMemo(() => {
-    const t3 = perioData[3] || { buccal: [2,3,3], lingual: [3,3,3] };
-    const t14 = perioData[14] || { buccal: [3,3,4], lingual: [3,4,3] };
-    const t32 = perioData[32] || { buccal: [5,5,5], lingual: [5,6,5] };
-    return [
-      { tooth: '#14', label: 'Periodontal maintenance', detail: `Probing: ${t14.buccal.join('-')} buccal · ${t14.lingual.join('-')} lingual · BOP at mesial & distolingual`, cdt: 'D4910', conf: 97, fee: 148, color: 'var(--orange-c)', segments: [3, 4, 6] },
-      { tooth: '#3', label: 'Calculus removal — supragingival scaling', detail: 'Scaling performed, all deposits removed', cdt: 'D1110', conf: 94, fee: 95, color: 'var(--teal-dark)', segments: [7] },
-      { tooth: 'ALL', label: 'Fluoride varnish applied', detail: '5% NaF varnish · all surfaces · post-scaling', cdt: 'D1206', conf: 99, fee: 48, color: 'var(--teal-dark)', segments: [8] },
-      { tooth: 'OHI', label: 'Oral hygiene instruction', detail: 'Modified Bass brushing technique · interproximal care reviewed', cdt: 'D1330', conf: 91, fee: 29, color: 'var(--teal-dark)', segments: [8] },
-      { tooth: '#32', label: 'Deep pocketing — active disease', detail: `Probing: ${t32.buccal.join('-')} buccal · ${t32.lingual.join('-')} lingual · BOP positive · suppuration noted`, cdt: 'D4341', conf: 88, fee: 180, color: 'var(--red-c)', segments: [9, 10] },
-    ];
-  }, [perioData]);
-
-  // Transcript segments
-  const transcriptSegments = [
-    { sp: 'DR', text: `${patientName.split(' ')[0]}, let's get started with the full periodontal charting today.`, entries: [] },
-    { sp: 'DR', text: "I'll check your probing depths first at six sites per tooth.", entries: [] },
-    { sp: 'PT', text: "Is that going to be the same as last time? I've been flossing more.", entries: [] },
-    { sp: 'DR', text: <>Let&apos;s see — tooth fourteen buccal: three, three, four. <span className="ev-span ev-active">Mesial four millimeters.</span></>, entries: ['#14'] },
-    { sp: 'DR', text: <><span className="ev-span ev-active">Distolingual is five millimeters at fourteen</span> — I&apos;m noting bleeding on probing there.</>, entries: ['#14'] },
-    { sp: 'PT', text: "Is that bleeding a bad sign?", entries: [] },
-    { sp: 'DR', text: "It indicates active inflammation. Your probing depths have improved from four-to-five down to three-to-four since February — that's real progress from the perio maintenance.", entries: ['#14'] },
-    { sp: 'DR', text: <>Moving to tooth three — buccal two, three, three. <span className="ev-span ev-active">Calculus deposits on the lingual, I&apos;ll remove those now.</span></>, entries: ['#3'] },
-    { sp: 'DR', text: <><span className="ev-span ev-active">After we finish scaling I&apos;ll apply fluoride varnish on all surfaces</span>, and we&apos;ll go over brushing technique — I want to reinforce the modified Bass method.</>, entries: ['ALL', 'OHI'] },
-    { sp: 'DR', text: <><span className="ev-span ev-active">Oh, look at tooth thirty-two — we have pocket depths of five, five, five on the buccal, and five, six, five on the lingual.</span> There is active bleeding and suppuration here, which indicates active periodontal disease. We will need to plan scaling and root planing.</>, entries: ['#32'] },
-    { sp: 'PT', text: "Okay, let's get that scheduled. I want to make sure we keep my gums healthy.", entries: ['#32'] },
-  ];
 
   // Helper functions for pocket depth styling
   const getToothBgColor = (t: number) => {
@@ -290,20 +260,6 @@ export default function ChartPage() {
     });
   };
 
-  // Check if a segment highlights
-  const isSegmentHighlighted = (index: number, segmentEntries: string[]) => {
-    if (hoveredSegment === index) return true;
-    if (hoveredEntry && segmentEntries.includes(hoveredEntry)) return true;
-    return false;
-  };
-
-  // Check if an entry card highlights
-  const isEntryHighlighted = (entryTooth: string, entrySegments: number[]) => {
-    if (hoveredEntry === entryTooth) return true;
-    if (hoveredSegment !== null && entrySegments.includes(hoveredSegment)) return true;
-    return false;
-  };
-
   const upperTeeth = Array.from({ length: 16 }, (_, i) => i + 1);
   const lowerTeeth = Array.from({ length: 16 }, (_, i) => 32 - i);
 
@@ -337,6 +293,21 @@ export default function ChartPage() {
           <button className="btn-sm btn-teal" onClick={() => router.push(`/dashboard/billing?patientId=${patientId}`)}>Proceed to Billing →</button>
         </div>
       </div>
+
+      {isProcessing && (
+        <div style={{
+          background: '#FFF9E6',
+          border: '1px solid var(--orange-c)',
+          color: 'var(--orange-c)',
+          padding: '10px 16px',
+          borderRadius: '8px',
+          marginBottom: '16px',
+          fontSize: '12.5px',
+          fontWeight: 600
+        }}>
+          ⟳ A new recording is still processing — the data below is from the previous visit. Refresh in a moment to see the updated chart.
+        </div>
+      )}
 
       {error && (
         <div style={{
@@ -678,48 +649,55 @@ export default function ChartPage() {
           {/* TAB 2: CLINICAL ENTRIES LIST */}
           {activeTab === 'entries' && (
             <div style={{padding:'16px'}}>
-              <div style={{fontSize:'11px',color:'var(--ink3)',marginBottom:'12px'}}>AI-extracted chart entries from transcript — hover an entry to highlight supporting sentences in the transcript panel</div>
-              {clinicalEntries.map(e => (
-                <div
-                  key={e.tooth}
-                  onMouseEnter={() => setHoveredEntry(e.tooth)}
-                  onMouseLeave={() => setHoveredEntry(null)}
-                  style={{
-                    display:'flex',
-                    alignItems:'flex-start',
-                    gap:'12px',
-                    padding:'14px',
-                    borderBottom:'1px solid var(--border)',
-                    cursor:'pointer',
-                    transition:'all 0.18s ease',
-                    borderLeft:`4px solid ${isEntryHighlighted(e.tooth, e.segments) ? 'var(--teal)' : 'transparent'}`,
-                    background: isEntryHighlighted(e.tooth, e.segments) ? 'var(--teal-xpale)' : 'transparent',
-                    borderRadius:'6px'
-                  }}
-                >
-                  <div style={{width:'40px',height:'40px',borderRadius:'10px',background:'var(--surface)',border:'1px solid var(--border2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'11px',fontWeight:800,color:'var(--navy)',fontFamily:'var(--font-mono)',flexShrink:0}}>
-                    {e.tooth}
-                  </div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:'13px',fontWeight:700,color:'var(--ink)',display:'flex',alignItems:'center',gap:'8px'}}>
-                      {e.label}
-                      {isEntryHighlighted(e.tooth, e.segments) && (
-                        <span style={{
-                          fontSize:'9px',
-                          color:'var(--teal-dark)',
-                          background:'var(--teal-pale)',
-                          padding:'1px 6px',
-                          borderRadius:'8px',
-                          fontWeight:'600'
-                        }}>Synced</span>
-                      )}
-                    </div>
-                    <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'2px',lineHeight:1.5}}>{e.detail}</div>
-                    <div style={{fontSize:'10px',fontFamily:'var(--font-mono)',color:'var(--teal-dark)',fontWeight:600,marginTop:'4px'}}>{e.cdt} · {e.conf}% confidence · Est. ${e.fee}</div>
-                  </div>
-                  <div style={{width:'8px',height:'8px',borderRadius:'50%',background:e.color,flexShrink:0,marginTop:'6px'}}/>
+              {clinicalEntries.length === 0 ? (
+                <div style={{fontSize:'12px',color:'var(--ink3)',fontStyle:'italic',padding:'12px 0'}}>
+                  No clinical findings yet — record a visit to generate AI-extracted chart entries here.
                 </div>
-              ))}
+              ) : (
+                <>
+                  <div style={{fontSize:'11px',color:'var(--ink3)',marginBottom:'12px'}}>AI-extracted chart entries from transcript — hover an entry to highlight its supporting sentence in the transcript panel</div>
+                  {clinicalEntries.map((e, i) => {
+                    const quote = e.segments?.[0]?.quote;
+                    const highlighted = !!quote && hoveredQuote === quote;
+                    return (
+                      <div
+                        key={i}
+                        onMouseEnter={() => quote && setHoveredQuote(quote)}
+                        onMouseLeave={() => setHoveredQuote(null)}
+                        style={{
+                          display:'flex',
+                          alignItems:'flex-start',
+                          gap:'12px',
+                          padding:'14px',
+                          borderBottom:'1px solid var(--border)',
+                          cursor: quote ? 'pointer' : 'default',
+                          transition:'all 0.18s ease',
+                          borderLeft:`4px solid ${highlighted ? 'var(--teal)' : 'transparent'}`,
+                          background: highlighted ? 'var(--teal-xpale)' : 'transparent',
+                          borderRadius:'6px'
+                        }}
+                      >
+                        <div style={{width:'40px',height:'40px',borderRadius:'10px',background:'var(--surface)',border:'1px solid var(--border2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'11px',fontWeight:800,color:'var(--navy)',fontFamily:'var(--font-mono)',flexShrink:0}}>
+                          {e.tooth}
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:'13px',fontWeight:700,color:'var(--ink)',display:'flex',alignItems:'center',gap:'8px'}}>
+                            {e.label}
+                            {highlighted && (
+                              <span style={{fontSize:'9px',color:'var(--teal-dark)',background:'var(--teal-pale)',padding:'1px 6px',borderRadius:'8px',fontWeight:'600'}}>Synced</span>
+                            )}
+                          </div>
+                          <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'2px',lineHeight:1.5}}>{e.detail}</div>
+                          <div style={{fontSize:'10px',fontFamily:'var(--font-mono)',color:'var(--teal-dark)',fontWeight:600,marginTop:'4px'}}>
+                            {e.cdt || 'No CDT code assigned'} · {e.conf}% confidence{e.fee != null ? ` · Est. $${e.fee}` : ''}
+                          </div>
+                        </div>
+                        <div style={{width:'8px',height:'8px',borderRadius:'50%',background:e.color,flexShrink:0,marginTop:'6px'}}/>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
             </div>
           )}
 
@@ -738,67 +716,51 @@ export default function ChartPage() {
                   Patient Clinical Summary Report
                 </div>
 
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'16px'}}>
-                  <div>
-                    <div style={{fontSize:'10px',fontWeight:'700',color:'var(--ink3)',textTransform:'uppercase',marginBottom:'4px'}}>Chief Complaint</div>
-                    <div style={{fontSize:'12px',color:'var(--ink)'}}>Routine periodontal charting, supragingival scaling and maintenance.</div>
+                {!summaryReport ? (
+                  <div style={{fontSize:'12px',color:'var(--ink3)',fontStyle:'italic'}}>
+                    No summary yet — record a visit to generate one.
                   </div>
-                  <div>
-                    <div style={{fontSize:'10px',fontWeight:'700',color:'var(--ink3)',textTransform:'uppercase',marginBottom:'4px'}}>Diagnosis Notes</div>
-                    <div style={{fontSize:'12px',color:'var(--ink)',lineHeight:'1.4'}}>
-                      • Localized active perio disease on <strong style={{color:'var(--red-c)'}}>Tooth #32</strong> (probing depth {perioData[32]?.buccal?.join('-') || '5-5-5'}mm buccal, BOP+, suppuration+).<br />
-                      • Localized mild pocketing (3-4mm) on <strong style={{color:'var(--orange-c)'}}>Tooth #14</strong> (stable/improved since last check).
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{marginBottom:'16px'}}>
-                  <div style={{fontSize:'10px',fontWeight:'700',color:'var(--ink3)',textTransform:'uppercase',marginBottom:'6px'}}>Today&apos;s Completed Procedures</div>
-                  <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
-                    {[
-                      { code: 'D4910', desc: `Periodontal maintenance (Tooth #14 quadrant: ${perioData[14]?.buccal?.join('-') || '3-3-4'})`, fee: 148 },
-                      { code: 'D1110', desc: 'Calculus removal — supragingival scaling (Tooth #3)', fee: 95 },
-                      { code: 'D1206', desc: 'Fluoride varnish applied (All Surfaces)', fee: 48 },
-                      { code: 'D1330', desc: 'Oral hygiene instruction (Reinforce modified Bass brushing)', fee: 29 }
-                    ].map(p => (
-                      <div key={p.code} style={{display:'flex',justifyContent:'space-between',fontSize:'12px',background:'var(--surface)',padding:'6px 12px',borderRadius:'6px'}}>
-                        <span><strong style={{fontFamily:'var(--font-mono)'}}>{p.code}</strong> — {p.desc}</span>
-                        <strong style={{color:'var(--teal-dark)'}}>${p.fee}</strong>
+                ) : (
+                  <>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'16px'}}>
+                      <div>
+                        <div style={{fontSize:'10px',fontWeight:'700',color:'var(--ink3)',textTransform:'uppercase',marginBottom:'4px'}}>Chief Complaint</div>
+                        <div style={{fontSize:'12px',color:'var(--ink)'}}>{summaryReport.chief_complaint || 'Not recorded'}</div>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                      <div>
+                        <div style={{fontSize:'10px',fontWeight:'700',color:'var(--ink3)',textTransform:'uppercase',marginBottom:'4px'}}>Clinical Notes</div>
+                        <div style={{fontSize:'12px',color:'var(--ink)',lineHeight:'1.4'}}>{summaryReport.clinical_notes || 'No notes recorded'}</div>
+                      </div>
+                    </div>
 
-                <div>
-                  <div style={{fontSize:'10px',fontWeight:'700',color:'var(--ink3)',textTransform:'uppercase',marginBottom:'6px'}}>Recommended Treatment Plan (Revenue Opportunities)</div>
-                  <div style={{
-                    border:'1.5px dashed var(--teal)',
-                    borderRadius:'8px',
-                    padding:'12px',
-                    background:'rgba(74,191,176,0.04)',
-                    display:'flex',
-                    justifyContent:'space-between',
-                    alignItems:'center'
-                  }}>
-                    <div>
-                      <div style={{fontSize:'13px',fontWeight:'bold',color:'var(--navy)'}}>D4341 — Scaling &amp; Root Planing (1-3 teeth)</div>
-                      <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'2px'}}>Recommended for active periodontal disease on Tooth #32.</div>
-                    </div>
-                    <div style={{textAlign:'right'}}>
-                      <div style={{fontSize:'15px',fontWeight:'bold',color:'var(--teal-dark)'}}>$180</div>
-                      <div style={{fontSize:'9px',color:'var(--ink3)'}}>Est. Fee</div>
-                    </div>
-                  </div>
-                </div>
+                    {!!summaryReport.recommendations?.length && (
+                      <div>
+                        <div style={{fontSize:'10px',fontWeight:'700',color:'var(--ink3)',textTransform:'uppercase',marginBottom:'6px'}}>Findings Needing Follow-up</div>
+                        <div style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+                          {summaryReport.recommendations.map((r, i) => (
+                            <div key={i} style={{border:'1.5px dashed var(--teal)',borderRadius:'8px',padding:'10px 12px',background:'rgba(74,191,176,0.04)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                              <div>
+                                <div style={{fontSize:'13px',fontWeight:'bold',color:'var(--navy)'}}>{r.desc}{r.tooth ? ` — Tooth ${r.tooth}` : ''}</div>
+                              </div>
+                              {r.fee != null && (
+                                <div style={{textAlign:'right'}}>
+                                  <div style={{fontSize:'15px',fontWeight:'bold',color:'var(--teal-dark)'}}>${r.fee}</div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',background:'var(--navy)',borderRadius:'12px',padding:'14px 20px',color:'white'}}>
-                <div>
-                  <div style={{fontSize:'10px',textTransform:'uppercase',letterSpacing:'0.08em',opacity:0.8}}>Total Billing Recovery</div>
-                  <div style={{fontSize:'20px',fontWeight:'800',fontFamily:'var(--font-mono)',marginTop:'2px'}}>$500.00</div>
+              {summaryReport && (
+                <div style={{display:'flex',justifyContent:'flex-end',alignItems:'center',background:'var(--navy)',borderRadius:'12px',padding:'14px 20px',color:'white'}}>
+                  <button className="btn-sm btn-teal" onClick={() => router.push(`/dashboard/billing?patientId=${patientId}`)}>Go to Billing Details</button>
                 </div>
-                <button className="btn-sm btn-teal" onClick={() => router.push(`/dashboard/billing?patientId=${patientId}`)}>Go to Billing Details</button>
-              </div>
+              )}
             </div>
           )}
         </div>
@@ -816,66 +778,37 @@ export default function ChartPage() {
             Hover a clinical entry to highlight supporting sentences below · Hover supporting sentences to highlight clinical entries
           </div>
           <div style={{flex:1,overflowY:'auto',padding:'8px 0',maxHeight:'400px'}}>
-            {transcriptSegments.map((seg, i) => {
-              const highlighted = isSegmentHighlighted(i, seg.entries);
-              return (
-                <div
-                  key={i}
-                  onMouseEnter={() => {
-                    if (seg.entries.length > 0) {
-                      setHoveredSegment(i);
-                      setHoveredEntry(seg.entries[0]);
-                    }
-                  }}
-                  onMouseLeave={() => {
-                    setHoveredSegment(null);
-                    setHoveredEntry(null);
-                  }}
-                  style={{
-                    padding:'8px 14px',
-                    cursor: seg.entries.length > 0 ? 'pointer' : 'default',
-                    transition:'all 0.15s ease',
-                    borderBottom:'0.5px solid transparent',
-                    background: highlighted ? 'rgba(255, 243, 192, 0.4)' : 'transparent',
-                    borderLeft: highlighted ? '3.5px solid var(--orange-c)' : '3.5px solid transparent'
-                  }}
-                >
-                  <div style={{
-                    display:'flex',
-                    alignItems:'center',
-                    justifyContent:'space-between',
-                    fontSize:'8px',
-                    fontWeight:800,
-                    letterSpacing:'.1em',
-                    marginBottom:'2px',
-                    color: seg.sp==='DR' ? 'var(--teal-dark)' : 'var(--navy-mid)'
-                  }}>
-                    <span>{seg.sp==='DR' ? 'DR. KIM' : 'PATIENT'}</span>
-                    {highlighted && seg.entries.length > 0 && (
-                      <span style={{
-                        fontSize:'8px',
-                        background:'rgba(192, 112, 16, 0.15)',
-                        color:'var(--orange-c)',
-                        padding:'1px 5px',
-                        borderRadius:'4px',
-                        fontWeight:'bold'
-                      }}>Evidence for {seg.entries.join(', ')}</span>
-                    )}
-                  </div>
-                  <div style={{
-                    fontSize:'12.5px',
-                    color: highlighted ? 'var(--navy)' : 'var(--ink)',
-                    lineHeight:1.6,
-                    fontWeight: highlighted ? '500' : 'normal'
-                  }}>
-                    {seg.text}
-                  </div>
-                </div>
-              );
-            })}
+            {!transcript ? (
+              <div style={{padding:'24px 16px',textAlign:'center',fontSize:'12px',color:'var(--ink3)'}}>
+                No transcript yet — record a visit to generate one.
+              </div>
+            ) : (
+              <div style={{padding:'8px 16px',fontSize:'12.5px',color:'var(--ink)',lineHeight:1.7}}>
+                {renderTranscriptWithHighlight(transcript, hoveredQuote)}
+              </div>
+            )}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+// Splits the transcript around the currently-hovered clinical entry's
+// verbatim quote (if it appears) and wraps that span so hovering a
+// clinical entry visually points back to the exact evidence sentence.
+function renderTranscriptWithHighlight(transcript: string, hoveredQuote: string | null) {
+  if (!hoveredQuote) return transcript;
+  const idx = transcript.indexOf(hoveredQuote);
+  if (idx === -1) return transcript;
+  const before = transcript.slice(0, idx);
+  const match = transcript.slice(idx, idx + hoveredQuote.length);
+  const after = transcript.slice(idx + hoveredQuote.length);
+  return (
+    <>
+      {before}
+      <mark style={{background:'rgba(255, 243, 192, 0.9)',color:'var(--navy)',fontWeight:500,borderRadius:'2px'}}>{match}</mark>
+      {after}
+    </>
   );
 }

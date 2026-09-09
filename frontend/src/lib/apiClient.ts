@@ -3,8 +3,11 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+  // FormData bodies (file uploads) must NOT get an explicit Content-Type —
+  // the browser sets one with the correct multipart boundary itself.
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers as Record<string, string>),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -86,15 +89,48 @@ export const authApi = {
 
 export interface Patient {
   id: number;
-  name: string;
+  first_name: string;
+  last_name: string;
+  dob?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  mrn?: string | null;
+  insurance_id?: string | null;
+  insurance_plan?: string | null;
+  risk_level?: string | null;
+  notes?: string | null;
+  practice_id?: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PatientCreatePayload {
+  first_name: string;
+  last_name: string;
   dob?: string;
-  meta?: string;
-  date: string;
-  initials?: string;
-  badge_text?: string;
-  badge?: string;
-  bg?: string;
-  color?: string;
+  email?: string;
+  phone?: string;
+  mrn?: string;
+  insurance_id?: string;
+  insurance_plan?: string;
+  risk_level?: string;
+  notes?: string;
+}
+
+export interface RecentSession {
+  patient_id: number;
+  patient_name: string;
+  status: string;
+  created_at: string;
+}
+
+export interface DashboardStats {
+  today_visits: number;
+  pending_review: number;
+  revenue_suggested: number;
+  active_patients: number;
+  recent_sessions: RecentSession[];
 }
 
 export interface ClinicalSession {
@@ -105,6 +141,7 @@ export interface ClinicalSession {
   perio_data?: any;
   clinical_entries?: any[];
   summary_report?: any;
+  error_message?: string | null;
   created_at: string;
 }
 
@@ -118,9 +155,12 @@ export interface AuditLog {
 
 export const patientsApi = {
   list: () => request<Patient[]>('/patients'),
-  create: (payload: Partial<Patient>) =>
+  create: (payload: PatientCreatePayload) =>
     request<Patient>('/patients', { method: 'POST', body: JSON.stringify(payload) }),
   get: (id: number) => request<Patient>(`/patients/${id}`),
+  update: (id: number, payload: Partial<PatientCreatePayload>) =>
+    request<Patient>(`/patients/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  dashboardStats: () => request<DashboardStats>('/patients/dashboard-stats'),
 };
 
 export const sessionsApi = {
@@ -129,6 +169,28 @@ export const sessionsApi = {
     request<ClinicalSession>('/transcription/session', { method: 'POST', body: JSON.stringify(payload) }),
   update: (sessionId: number, payload: Partial<ClinicalSession>) =>
     request<ClinicalSession>(`/notes/session/${sessionId}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  // Uploads recorded audio and kicks off the real transcribe -> extract ->
+  // persist pipeline in the background. Returns immediately with the
+  // session in status="processing" — poll getActive() until it's done.
+  startRecordingJob: (patientId: number, audioBlob: Blob) => {
+    // Name the file with the extension matching its actual MIME type — the
+    // backend infers audio format from the filename extension.
+    const extensionByType: Record<string, string> = {
+      'audio/webm': 'webm',
+      'audio/ogg': 'ogg',
+      'audio/mp4': 'm4a',
+      'audio/wav': 'wav',
+      'audio/mpeg': 'mp3',
+    };
+    const baseType = audioBlob.type.split(';')[0];
+    const extension = extensionByType[baseType] || 'webm';
+    const formData = new FormData();
+    formData.append('file', audioBlob, `recording.${extension}`);
+    return request<ClinicalSession>(`/transcription/session/${patientId}/record`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
 };
 
 export const logsApi = {

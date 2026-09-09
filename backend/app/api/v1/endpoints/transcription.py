@@ -1,16 +1,17 @@
 import os
 import sys
 from datetime import datetime
-from tempfile import NamedTemporaryFile
+from uuid import uuid4
 
-import groq
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_db, get_current_active_user
+from app.models.patient import Patient as PatientModel
 from app.models.session import ClinicalSession as SessionModel
 from app.models.user import User
 from app.schemas.session import ClinicalSessionCreate, ClinicalSessionOut, ClinicalSessionUpdate
+from app.services.session_pipeline import process_recording
 
 # Ensure root directory is in sys.path so we can import config.py
 root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../../"))
@@ -87,44 +88,79 @@ def get_demo_transcript():
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Demo transcript not found. Please run the local pipeline first.")
 
-@router.post("/transcribe")
-async def transcribe_audio(file: UploadFile = File(...)):
+MAX_AUDIO_BYTES = 25 * 1024 * 1024  # 25 MB
+ALLOWED_AUDIO_EXTENSIONS = {"wav", "mp3", "m4a", "webm", "ogg"}
+
+
+@router.post("/session/{patient_id}/record", response_model=ClinicalSessionOut)
+async def start_recording_job(
+    patient_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
     """
-    Upload an audio file -> Transcribe via Groq Whisper -> Return transcript.
+    Upload a recorded visit's audio, kick off the real transcribe -> extract
+    -> persist pipeline in the background, and return immediately with the
+    session in status="processing". The frontend polls GET /session/{id}
+    (below) until status becomes "complete" or "error".
     """
-    # 1. Extract API key from config (or env)
-    api_key = config.GROQ_API_KEY
-    if not api_key:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY is not set. Please set it in config.py or as an environment variable.")
+    if not config.GROQ_API_KEY:
+        # Fail fast and clearly here rather than letting the background job
+        # die later with an opaque Groq SDK auth error the user never sees
+        # until they poll and get a generic error_message.
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY is not configured on the server.")
 
-    # 2. Save uploaded file to a temporary file so we can pass it to the Groq client
-    temp_path = ""
-    try:
-        with NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
-            temp_file.write(await file.read())
-            temp_path = temp_file.name
+    patient = (
+        db.query(PatientModel)
+        .filter(PatientModel.id == patient_id, PatientModel.practice_id == current_user.id)
+        .first()
+    )
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
 
-        # 3. Call Groq Whisper API
-        client = groq.Groq(api_key=api_key)
-        
-        with open(temp_path, "rb") as audio_file:
-            transcription = client.audio.transcriptions.create(
-                file=(file.filename, audio_file.read()),
-                model="whisper-large-v3",
-                prompt=config.WHISPER_INITIAL_PROMPT,
-                response_format="json",
-                language="en",
-                temperature=0.0
-            )
+    extension = file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else ""
+    if extension not in ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported audio format. Allowed: {', '.join(sorted(ALLOWED_AUDIO_EXTENSIONS))}",
+        )
 
-        return {"transcript": transcription.text}
+    # Read in chunks and abort as soon as the limit is exceeded, rather than
+    # buffering an arbitrarily large upload fully into memory before
+    # checking its size.
+    chunks = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_AUDIO_BYTES:
+            raise HTTPException(status_code=413, detail="Audio file too large (max 25 MB)")
+        chunks.append(chunk)
+    audio_bytes = b"".join(chunks)
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio file")
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        # 4. Clean up the temp file
-        if temp_path and os.path.exists(temp_path):
-            os.remove(temp_path)
+    session = db.query(SessionModel).filter(SessionModel.patient_id == patient_id).first()
+    if session:
+        session.status = "processing"
+        session.error_message = None
+    else:
+        session = SessionModel(patient_id=patient_id, status="processing")
+        db.add(session)
+    # A fresh token per recording job — process_recording only commits its
+    # results if this session is still the one it was started for, so an
+    # older, still-running job can't clobber a newer recording's results.
+    session.job_token = uuid4().hex
+    db.commit()
+    db.refresh(session)
+
+    background_tasks.add_task(process_recording, session.id, session.job_token, audio_bytes, file.filename)
+
+    return session
 
 @router.get("/session/{patient_id}", response_model=ClinicalSessionOut)
 def get_session(
