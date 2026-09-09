@@ -18,3 +18,9 @@ psycopg2-binary>=2.9.9
 # Supabase-issued JWTs and talks to Supabase Auth via supabase-py.
 supabase>=2.9.0
 email-validator>=2.0.0
+
+# Tests — run against a real (dev/test) Supabase project via TestClient;
+# there's no separate local test DB, so tests create throwaway accounts
+# with unique emails per run rather than relying on fixtures/mocks.
+pytest>=8.0.0
+httpx>=0.27.0
