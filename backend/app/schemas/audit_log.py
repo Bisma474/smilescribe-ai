@@ -12,6 +12,7 @@ class HIPAAAuditLogCreate(HIPAAAuditLogBase):
 class HIPAAAuditLogOut(HIPAAAuditLogBase):
     id: int
     timestamp: datetime
+    practice_id: int | None = None
 
     class Config:
         from_attributes = True
