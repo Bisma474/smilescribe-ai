@@ -70,20 +70,62 @@ def _load_pipeline():
     return pipeline
 
 
+def _decode_to_waveform(audio_path: str, sample_rate: int = 16000):
+    """Decode any audio file pyannote needs to a mono waveform tensor via
+    the ffmpeg CLI, rather than handing pyannote a file path directly.
+
+    pyannote.audio 4.x reads files through torchcodec, whose native
+    decoder libraries must exactly match one specific installed FFmpeg
+    build (with shared DLLs) — a fragile pairing to keep working across a
+    dev machine and a deploy server, and prone to breaking on FFmpeg
+    upgrades. Shelling out to the `ffmpeg` binary directly (already a
+    project dependency for other reasons) and handing pyannote a raw
+    waveform via its {"waveform": tensor, "sample_rate": ...} input form
+    sidesteps torchcodec entirely."""
+    import subprocess
+
+    import numpy as np
+    import torch
+
+    proc = subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-i", audio_path,
+            "-f", "f32le", "-ac", "1", "-ar", str(sample_rate), "-",
+        ],
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0 or not proc.stdout:
+        raise DiarizationUnavailable(
+            f"ffmpeg failed to decode audio for diarization: {proc.stderr.decode(errors='replace')[:500]}"
+        )
+
+    samples = np.frombuffer(proc.stdout, dtype=np.float32).copy()
+    waveform = torch.from_numpy(samples).unsqueeze(0)  # shape: (1 channel, n_samples)
+    return {"waveform": waveform, "sample_rate": sample_rate}
+
+
 def diarize_audio(audio_path: str) -> list[dict]:
     """Run diarization on an audio file path, returning speaker turns as
     [{start, end, speaker}, ...] sorted by start time, with raw pyannote
     labels ("SPEAKER_00", "SPEAKER_01", ...) — not yet mapped to
     Dentist/Patient (see merge_with_transcript)."""
     pipeline = _load_pipeline()
+    audio_input = _decode_to_waveform(audio_path)
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=UserWarning)
-        diarization = pipeline(audio_path)
+        result = pipeline(audio_input)
+
+    # pyannote.audio 4.x wraps the result in a DiarizeOutput dataclass
+    # (speaker_diarization / exclusive_speaker_diarization / speaker
+    # embeddings) instead of returning the Annotation directly like 3.x
+    # did — unwrap it, but stay compatible with either version.
+    annotation = getattr(result, "speaker_diarization", result)
 
     turns = [
         {"start": turn.start, "end": turn.end, "speaker": speaker}
-        for turn, _, speaker in diarization.itertracks(yield_label=True)
+        for turn, _, speaker in annotation.itertracks(yield_label=True)
     ]
     turns.sort(key=lambda t: t["start"])
     return turns
