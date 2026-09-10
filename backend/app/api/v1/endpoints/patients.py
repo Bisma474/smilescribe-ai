@@ -18,12 +18,27 @@ def get_patients(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    return (
+    patients = (
         db.query(PatientModel)
         .filter(PatientModel.practice_id == current_user.id)
         .order_by(PatientModel.created_at.desc())
         .all()
     )
+
+    # Attach each patient's most recent session's created_at (last_visit_at
+    # on the schema — see its docstring for why this exists) with one
+    # grouped query rather than one session lookup per patient.
+    last_visits = dict(
+        db.query(SessionModel.patient_id, func.max(SessionModel.created_at))
+        .join(PatientModel, SessionModel.patient_id == PatientModel.id)
+        .filter(PatientModel.practice_id == current_user.id)
+        .group_by(SessionModel.patient_id)
+        .all()
+    )
+    for p in patients:
+        p.last_visit_at = last_visits.get(p.id)
+
+    return patients
 
 
 @router.post("/", response_model=PatientOut, status_code=201)
