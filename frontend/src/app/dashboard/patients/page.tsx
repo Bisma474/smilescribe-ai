@@ -237,7 +237,7 @@ export default function PatientsPage() {
               <div
                 key={p.id}
                 className="pt-row"
-                onClick={() => router.push(`/dashboard/recording?patientId=${p.id}`)}
+                onClick={() => router.push(`/dashboard/patients/${p.id}`)}
               >
                 <div className="patient-avatar" style={{background:style.bg,color:style.color}}>{patientInitials(p)}</div>
                 <div style={{flex:1,minWidth:0}}>
