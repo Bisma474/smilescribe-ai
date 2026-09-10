@@ -1,7 +1,10 @@
 import json
+import logging
 import re
 from groq import Groq
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 client = Groq(api_key=settings.GROQ_API_KEY)
 
@@ -44,23 +47,55 @@ Return ONLY valid JSON, no markdown, no explanation."""
 
 
 def extract_chart(transcript: str, pageindex_context: str = "") -> list[dict]:
+    """Extract clinical findings from a transcript via the LLM.
+
+    openai/gpt-oss-120b is a reasoning model — without reasoning_effort
+    capped and a generous max_completion_tokens, it was observed (live,
+    reproduced directly against the Groq API) to spend its entire token
+    budget on internal chain-of-thought before ever emitting the JSON
+    response, returning a completely empty completion. Groq's own
+    json_object validator then rejects that empty output with a 400
+    'json_validate_failed' and an empty failed_generation, which looks
+    like a transient API error but is actually deterministic for a given
+    transcript — reproduced identically on every retry until these
+    params were added. reasoning_effort='low' is enough for a
+    straightforward extraction task like this one.
+
+    As defense in depth (the params above fixed every case tested, but
+    Groq's own API can still fail for unrelated reasons — rate limits,
+    an outage, etc.), the call is still retried once, and if it fails
+    even after that, this returns a synthetic error entry instead of
+    raising — the caller (session_pipeline) already has a real, saved
+    transcript by this point, so an extraction failure shouldn't throw
+    that away and mark the whole visit as failed. The synthetic error
+    entry is rendered as a visible "Extraction error" card on the Chart
+    page rather than silently vanishing (see chart_mapping.py)."""
     system_msg = EXTRACTION_PROMPT
     if pageindex_context:
         system_msg += f"\n\nRelevant dental knowledge context:\n{pageindex_context}"
 
-    response = client.chat.completions.create(
-        model="openai/gpt-oss-120b",
-        messages=[
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": f"Transcript:\n{transcript}"},
-        ],
-        response_format={"type": "json_object"},
-        temperature=0.1,
-    )
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            response = client.chat.completions.create(
+                model="openai/gpt-oss-120b",
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": f"Transcript:\n{transcript}"},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.1,
+                max_completion_tokens=4000,
+                reasoning_effort="low",
+            )
+            content = response.choices[0].message.content
+            return _parse_and_validate(content, transcript)
+        except Exception as e:  # noqa: BLE001 — any Groq/SDK failure, retried once
+            last_error = e
+            logger.warning("extract_chart attempt %d failed: %s", attempt + 1, e)
 
-    content = response.choices[0].message.content
-    entries = _parse_and_validate(content, transcript)
-    return entries
+    logger.error("extract_chart failed after retry: %s", last_error)
+    return [{"error": "AI chart extraction failed after retrying", "raw": str(last_error)}]
 
 
 def _parse_and_validate(raw: str, transcript: str) -> list[dict]:
