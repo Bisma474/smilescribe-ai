@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import React from 'react';
 
@@ -240,6 +240,13 @@ describe('🔒 DentalScribeAI — Aggressive Frontend Unit Test Suite', () => {
   });
 
   describe('4. Billing & CDT Code Stateful Action Tests', () => {
+    // Chart/Billing pages now show a patient picker instead of guessing a
+    // hardcoded patient when no ?patientId is in the URL (that hardcoded
+    // id was a leftover demo value that doesn't exist in real data) — set
+    // one here so these tests exercise the actual billing view.
+    beforeEach(() => { window.history.pushState({}, '', '/dashboard/billing?patientId=1'); });
+    afterEach(() => { window.history.pushState({}, '', '/'); });
+
     it('should show a real empty state when no session data has loaded', () => {
       render(<BillingPage />);
 
@@ -263,6 +270,10 @@ describe('🔒 DentalScribeAI — Aggressive Frontend Unit Test Suite', () => {
   });
 
   describe('5. Chart Review & Interactive Teeth Chart Tests', () => {
+    // See the note in the Billing describe block above — same reasoning.
+    beforeEach(() => { window.history.pushState({}, '', '/dashboard/chart?patientId=1'); });
+    afterEach(() => { window.history.pushState({}, '', '/'); });
+
     it('should load Perio Chart as the active tab by default', () => {
       render(<ChartPage />);
       expect(screen.getByText('Maxillary Arch (Upper Teeth 1-16)')).toBeDefined();
@@ -286,20 +297,20 @@ describe('🔒 DentalScribeAI — Aggressive Frontend Unit Test Suite', () => {
       expect(screen.getByText(/No summary yet/)).toBeDefined();
     });
 
-    it('should allow selecting different teeth and show corresponding AI findings', () => {
+    it('should allow selecting different teeth and show the real (neutral) default state', () => {
       render(<ChartPage />);
 
-      // Tooth 32 (should have active perio disease details)
+      // The perio grid now starts genuinely blank for every tooth — no
+      // AI extraction feeds it (that's a deliberately manual flow) — so
+      // every tooth shows the same real "no findings" empty state rather
+      // than a fixed set of demo findings on three specific teeth.
       const tooth32Btn = screen.getByText('32');
       fireEvent.click(tooth32Btn);
-
       expect(screen.getByText('Tooth #32 Details')).toBeDefined();
-      expect(screen.getByText(/Deep pocketing/)).toBeDefined();
+      expect(screen.getByText(/No abnormal clinical conditions detected/)).toBeDefined();
 
-      // Tooth 1 (should be normal tooth defaults)
       const tooth1Btn = screen.getByText('1');
       fireEvent.click(tooth1Btn);
-
       expect(screen.getByText('Tooth #1 Details')).toBeDefined();
       expect(screen.getByText(/No abnormal clinical conditions detected/)).toBeDefined();
     });
@@ -311,17 +322,16 @@ describe('🔒 DentalScribeAI — Aggressive Frontend Unit Test Suite', () => {
       fireEvent.click(screen.getByText('14'));
       expect(screen.getByText('Tooth #14 Details')).toBeDefined();
 
-      // Find the Straight buccal depth control (default should be 3)
+      // Find the Straight buccal depth control (neutral default is 2 for
+      // every tooth now)
       const straightBuccalContainer = screen.getAllByText('Straight')[0].nextSibling as HTMLElement;
       const decBtn = straightBuccalContainer.querySelector('button:first-child') as HTMLButtonElement;
       const incBtn = straightBuccalContainer.querySelector('button:last-child') as HTMLButtonElement;
       const valueSpan = straightBuccalContainer.querySelector('span') as HTMLSpanElement;
 
-      expect(valueSpan.textContent).toBe('3');
+      expect(valueSpan.textContent).toBe('2');
 
       // Decrement value
-      fireEvent.click(decBtn);
-      expect(valueSpan.textContent).toBe('2');
       fireEvent.click(decBtn);
       expect(valueSpan.textContent).toBe('1');
       
