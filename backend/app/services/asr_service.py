@@ -4,11 +4,17 @@ from app.core.config import settings
 
 client = Groq(api_key=settings.GROQ_API_KEY)
 
+# Previously also told Whisper to "label speakers as DR: and PT:" — but
+# Whisper doesn't actually identify speakers, it would just insert those
+# literal tokens into the transcript unreliably (guessing from context, not
+# hearing distinct voices). Real speaker labels now come from
+# diarization_service.py (pyannote.audio, which does hear distinct voices)
+# merged in afterward — keeping this instruction here would just add
+# spurious/conflicting labels into the plain transcript text.
 DENTAL_PROMPT = (
-    "This is a dental appointment conversation between a dentist (DR) and a patient (PT). "
+    "This is a dental appointment conversation between a dentist and a patient. "
     "Transcribe accurately including dental terminology: tooth numbers, surfaces (mesial, distal, buccal, lingual, occlusal), "
-    "periodontal probing depths, caries, restorations, scaling, and fluoride treatments. "
-    "Label speakers as DR: and PT: respectively."
+    "periodontal probing depths, caries, restorations, scaling, and fluoride treatments."
 )
 
 
