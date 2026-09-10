@@ -40,7 +40,7 @@ export default function Sidebar({ isOpen, onClose }: Props) {
       `}</style>
 
       <div className="sidebar-section">Main</div>
-      {NAV.slice(0,4).map(n => (
+      {NAV.slice(0,5).map(n => (
         <div key={n.id} className={`nav-item${pathname===n.href?' active':''}`} onClick={() => navigate(n.href)}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:'18px',height:'18px',flexShrink:0,opacity:pathname===n.href?1:0.7}}>
             {n.icon}
