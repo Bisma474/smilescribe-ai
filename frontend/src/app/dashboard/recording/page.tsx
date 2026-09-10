@@ -5,7 +5,7 @@ import { patientsApi, type Patient } from '@/lib/apiClient';
 import { patientName as formatPatientName, patientInitials } from '@/lib/patientDisplay';
 import { setPendingRecording } from '@/lib/recordingSession';
 
-type RecorderState = 'requesting-mic' | 'recording' | 'stopping' | 'error';
+type RecorderState = 'requesting-mic' | 'recording' | 'paused' | 'stopping' | 'error';
 
 // Pick a MIME type MediaRecorder actually supports in this browser.
 function pickMimeType(): string {
@@ -114,7 +114,7 @@ export default function RecordingPage() {
 
   const handleStop = useCallback(() => {
     const recorder = mediaRecorderRef.current;
-    if (!recorder || state !== 'recording') return;
+    if (!recorder || (state !== 'recording' && state !== 'paused')) return;
     setState('stopping');
 
     recorder.onstop = () => {
@@ -125,6 +125,25 @@ export default function RecordingPage() {
     };
     recorder.stop();
   }, [state, patientId, router]);
+
+  // MediaRecorder.pause()/resume() are broadly supported (Chrome/Firefox/
+  // Edge, Safari 14.1+) but not guaranteed — guarded so an older browser
+  // just doesn't offer the button rather than throwing.
+  const canPause = typeof MediaRecorder !== 'undefined' && 'pause' in MediaRecorder.prototype;
+
+  const handlePause = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || state !== 'recording') return;
+    recorder.pause();
+    setState('paused');
+  }, [state]);
+
+  const handleResume = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || state !== 'paused') return;
+    recorder.resume();
+    setState('recording');
+  }, [state]);
 
   const fmt = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
@@ -199,6 +218,7 @@ export default function RecordingPage() {
           <div className="page-sub">{patientName || 'Patient'}</div>
         </div>
         {state === 'recording' && <div className="live-badge"><div className="live-dot" /> LIVE</div>}
+        {state === 'paused' && <div className="live-badge" style={{ background: 'var(--ink3)' }}>PAUSED</div>}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px' }}>
@@ -206,7 +226,8 @@ export default function RecordingPage() {
           <div className="rec-timer">{fmt(seconds)}</div>
           <div style={{ fontSize: '13px', color: 'var(--ink3)', marginTop: '6px' }}>
             {state === 'requesting-mic' ? 'Requesting microphone access…' :
-              state === 'stopping' ? 'Stopping…' : 'Recording in progress'}
+              state === 'stopping' ? 'Stopping…' :
+              state === 'paused' ? 'Recording paused' : 'Recording in progress'}
           </div>
           <div className="rec-btn-wrap">
             <div className="rec-ring" />
@@ -214,13 +235,22 @@ export default function RecordingPage() {
             <div
               className="rec-btn"
               onClick={handleStop}
-              style={{ opacity: state === 'recording' ? 1 : 0.5, cursor: state === 'recording' ? 'pointer' : 'default' }}
+              style={{ opacity: state === 'recording' || state === 'paused' ? 1 : 0.5, cursor: state === 'recording' || state === 'paused' ? 'pointer' : 'default' }}
             >
               <div className="rec-stop" />
             </div>
           </div>
+          {canPause && (state === 'recording' || state === 'paused') && (
+            <button
+              className="btn-outline"
+              onClick={state === 'paused' ? handleResume : handlePause}
+              style={{ marginBottom: '12px' }}
+            >
+              {state === 'paused' ? '▶ Resume' : '⏸ Pause'}
+            </button>
+          )}
           <div style={{ fontSize: '11px', color: 'var(--ink3)', marginBottom: '16px' }}>
-            {state === 'recording' ? 'Tap to stop and process' : ''}
+            {state === 'recording' ? 'Tap to stop and process' : state === 'paused' ? 'Tap Resume to continue, or the button above to stop and process' : ''}
           </div>
           <div className="waveform">
             {Array.from({ length: 16 }).map((_, i) => (
