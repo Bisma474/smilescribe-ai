@@ -102,6 +102,10 @@ export default function ChartPage() {
     const params = new URLSearchParams(window.location.search);
     const pIdStr = params.get('patientId');
     const pId = pIdStr ? parseInt(pIdStr, 10) : NaN;
+    // Optional — set when reached from a patient's Recording History list
+    // to view one specific past visit rather than always the latest.
+    const sessIdStr = params.get('sessionId');
+    const sessIdFromUrl = sessIdStr ? parseInt(sessIdStr, 10) : NaN;
 
     if (!pIdStr || Number.isNaN(pId)) {
       // No patient in context (e.g. reached via sidebar/bottom-tab nav,
@@ -139,8 +143,12 @@ export default function ChartPage() {
         setPatientName(formatPatientName(pt));
         setPatientMeta(formatPatientMeta(pt));
 
-        // 2. Fetch session data
-        const session = await sessionsApi.getActive(pId);
+        // 2. Fetch session data — a specific past visit if sessionId is in
+        // the URL (from the patient detail page's Recording History list),
+        // otherwise the patient's most recent visit as before.
+        const session = Number.isNaN(sessIdFromUrl)
+          ? await sessionsApi.getActive(pId)
+          : await sessionsApi.getById(sessIdFromUrl);
         setSessionId(session.id);
 
         if (session.perio_data) {
