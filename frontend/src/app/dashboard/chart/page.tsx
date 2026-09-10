@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { patientsApi, sessionsApi, logsApi } from '@/lib/apiClient';
+import { patientsApi, sessionsApi, logsApi, type Patient } from '@/lib/apiClient';
 import { patientName as formatPatientName, patientMeta as formatPatientMeta } from '@/lib/patientDisplay';
 import { useAuth } from '@/store/AuthContext';
 
@@ -17,48 +17,24 @@ interface ToothInfo {
 
 const DEFAULT_PERIO_DATA: Record<number, ToothInfo> = {};
 
-// Helper to fill default normal values for all 32 teeth
+// A genuinely blank perio chart — the AI extraction service doesn't
+// produce structured 6-point probing data (that's a deliberately manual,
+// dentist-entered flow), so every tooth starts at the same neutral
+// baseline with no label/finding. Previously this seeded three specific
+// teeth (3, 14, 32) with a fixed set of demo findings ("Deep pocketing —
+// active disease", etc.) that got saved back to a session as if real —
+// every patient's very first chart view would silently acquire the same
+// three fake findings.
 const generateDefaultPerioData = (): Record<number, ToothInfo> => {
-  const initialData: Record<number, ToothInfo> = {
-    3: {
-      buccal: [2, 3, 3],
-      lingual: [3, 3, 3],
-      bopBuccal: [false, false, false],
-      bopLingual: [false, true, false],
-      suppuration: false,
-      label: 'Calculus removal — supragingival scaling',
-      finding: 'Calculus deposits on the lingual. Supragingival scaling performed, all deposits removed.'
-    },
-    14: {
-      buccal: [3, 3, 4],
-      lingual: [3, 4, 3],
-      bopBuccal: [false, false, true],
-      bopLingual: [true, false, true],
-      suppuration: false,
-      label: 'Periodontal maintenance',
-      finding: 'Periodontal maintenance (D4910). Probing depths 3-4mm. Bleeding on probing (BOP) at mesial & distolingual surfaces.'
-    },
-    32: {
-      buccal: [5, 5, 5],
-      lingual: [5, 6, 5],
-      bopBuccal: [true, true, true],
-      bopLingual: [true, true, true],
-      suppuration: true,
-      label: 'Deep pocketing — active disease',
-      finding: 'Deep pocketing (5mm+) on multiple sites. BOP positive, suppuration noted. Active periodontal disease. CDT code D4341 recommended.'
-    }
-  };
-
+  const initialData: Record<number, ToothInfo> = {};
   for (let i = 1; i <= 32; i++) {
-    if (!initialData[i]) {
-      initialData[i] = {
-        buccal: [2, 2, 3],
-        lingual: [2, 2, 2],
-        bopBuccal: [false, false, false],
-        bopLingual: [false, false, false],
-        suppuration: false
-      };
-    }
+    initialData[i] = {
+      buccal: [2, 2, 2],
+      lingual: [2, 2, 2],
+      bopBuccal: [false, false, false],
+      bopLingual: [false, false, false],
+      suppuration: false
+    };
   }
   return initialData;
 };
@@ -88,10 +64,21 @@ export default function ChartPage() {
   const router = useRouter();
   const { user } = useAuth();
   
-  const [patientId, setPatientId] = useState<number>(2); // Default to Marcus Torres (2)
-  const [patientName, setPatientName] = useState<string>('Marcus Torres');
-  const [patientMeta, setPatientMeta] = useState<string>('DOB: 1981-03-14 · Perio maintenance');
+  // null = not yet determined whether the URL even has a patientId.
+  // Previously defaulted silently to a hardcoded id (2) when absent — a
+  // ghost patient from the old demo data that doesn't exist in a real
+  // practice's data, so reaching this page via the sidebar/bottom-tab nav
+  // (neither of which passes a patientId) would try to load a nonexistent
+  // patient and render nothing.
+  const [patientId, setPatientId] = useState<number | null>(null);
+  const [patientName, setPatientName] = useState<string>('');
+  const [patientMeta, setPatientMeta] = useState<string>('');
   const [sessionId, setSessionId] = useState<number | null>(null);
+
+  // Shown instead of chart data when no patientId is in the URL.
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [loadingPatients, setLoadingPatients] = useState(false);
+  const [patientsError, setPatientsError] = useState('');
   
   const [activeTab, setActiveTab] = useState<'perio' | 'entries' | 'summary'>('perio');
   const [selectedTooth, setSelectedTooth] = useState<number>(14);
@@ -114,7 +101,21 @@ export default function ChartPage() {
     // Read patientId from URL parameters safely in browser
     const params = new URLSearchParams(window.location.search);
     const pIdStr = params.get('patientId');
-    const pId = pIdStr ? parseInt(pIdStr) : 2;
+    const pId = pIdStr ? parseInt(pIdStr, 10) : NaN;
+
+    if (!pIdStr || Number.isNaN(pId)) {
+      // No patient in context (e.g. reached via sidebar/bottom-tab nav,
+      // not a patient's own page) or a malformed patientId — show a
+      // picker instead of guessing or passing NaN to the API.
+      let cancelled = false;
+      setLoadingPatients(true);
+      patientsApi.list()
+        .then(list => { if (!cancelled) setPatients(list); })
+        .catch(err => { if (!cancelled) setPatientsError(err instanceof Error ? err.message : 'Failed to load patients.'); })
+        .finally(() => { if (!cancelled) setLoadingPatients(false); });
+      return () => { cancelled = true; };
+    }
+
     setPatientId(pId);
 
     const loadData = async () => {
@@ -262,6 +263,50 @@ export default function ChartPage() {
 
   const upperTeeth = Array.from({ length: 16 }, (_, i) => i + 1);
   const lowerTeeth = Array.from({ length: 16 }, (_, i) => 32 - i);
+
+  if (patientId === null) {
+    return (
+      <div>
+        <div className="page-header">
+          <div className="page-title">Chart Review</div>
+          <div className="page-sub">Choose a patient to review their chart.</div>
+        </div>
+        {patientsError && (
+          <div style={{ fontSize: '12.5px', color: 'var(--red-c, #A03030)', marginBottom: '16px' }}>
+            {patientsError}
+          </div>
+        )}
+        {loadingPatients ? (
+          <div style={{ fontSize: '12px', color: 'var(--ink3)' }}>Loading patients…</div>
+        ) : patients.length === 0 && !patientsError ? (
+          <div className="card" style={{ textAlign: 'center', padding: '32px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--ink3)', marginBottom: '16px' }}>
+              No patients yet — add one first.
+            </div>
+            <button className="btn-primary" onClick={() => router.push('/dashboard/patients')}>
+              Go to Patients
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: '1fr' }}>
+            {patients.map(p => (
+              <div
+                key={p.id}
+                className="patient-card"
+                onClick={() => router.push(`/dashboard/chart?patientId=${p.id}`)}
+                style={{ cursor: 'pointer' }}
+              >
+                <div className="patient-avatar">{formatPatientName(p).split(' ').map(n => n[0]).join('').toUpperCase()}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="patient-name">{formatPatientName(p)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -486,7 +531,7 @@ export default function ChartPage() {
                     <div>
                       <div style={{fontSize:'14px',fontWeight:'700',color:'var(--navy)'}}>Tooth #{selectedTooth} Details</div>
                       <div style={{fontSize:'11px',color:'var(--ink3)'}}>
-                        {selectedTooth <= 16 ? 'Maxillary Upper Arch' : 'Mandibular Lower Arch'} · {selectedTooth === 32 || selectedTooth === 14 || selectedTooth === 3 ? 'AI Findings Extracted' : 'Normal parameters'}
+                        {selectedTooth <= 16 ? 'Maxillary Upper Arch' : 'Mandibular Lower Arch'} · {perioData[selectedTooth]?.finding ? 'Findings on record' : 'Normal parameters'}
                       </div>
                     </div>
                   </div>

@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { patientsApi, sessionsApi, logsApi } from '@/lib/apiClient';
+import { patientsApi, sessionsApi, logsApi, type Patient } from '@/lib/apiClient';
 import { patientName as formatPatientName, patientMeta as formatPatientMeta } from '@/lib/patientDisplay';
 import { useAuth } from '@/store/AuthContext';
 
@@ -16,23 +16,47 @@ export default function BillingPage() {
   const router = useRouter();
   const { user } = useAuth();
   
-  const [patientId, setPatientId] = useState<number>(2); // Default to Marcus Torres (2)
-  const [patientName, setPatientName] = useState<string>('Marcus Torres');
-  const [patientMeta, setPatientMeta] = useState<string>('DOB: 1981-03-14');
+  // null = not yet determined whether the URL even has a patientId.
+  // Previously defaulted silently to a hardcoded id (2) when absent — a
+  // ghost patient from the old demo data that doesn't exist in a real
+  // practice's data, so reaching this page via the sidebar/bottom-tab nav
+  // (neither of which passes a patientId) would try to load a nonexistent
+  // patient and render nothing.
+  const [patientId, setPatientId] = useState<number | null>(null);
+  const [patientName, setPatientName] = useState<string>('');
+  const [patientMeta, setPatientMeta] = useState<string>('');
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [summaryReport, setSummaryReport] = useState<any>(null);
 
   const [cdtList, setCdtList] = useState<CdtItem[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Shown instead of billing data when no patientId is in the URL.
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [loadingPatients, setLoadingPatients] = useState(false);
+  const [patientsError, setPatientsError] = useState('');
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const pIdStr = params.get('patientId');
-    const pId = pIdStr ? parseInt(pIdStr) : 2;
+    const pId = pIdStr ? parseInt(pIdStr, 10) : NaN;
+
+    if (!pIdStr || Number.isNaN(pId)) {
+      // No patient in context, or a malformed patientId — show a picker
+      // instead of guessing or passing NaN to the API.
+      let cancelled = false;
+      setLoadingPatients(true);
+      patientsApi.list()
+        .then(list => { if (!cancelled) setPatients(list); })
+        .catch(err => { if (!cancelled) setPatientsError(err instanceof Error ? err.message : 'Failed to load patients.'); })
+        .finally(() => { if (!cancelled) setLoadingPatients(false); });
+      return () => { cancelled = true; };
+    }
+
     setPatientId(pId);
 
     const loadData = async () => {
@@ -141,6 +165,50 @@ export default function BillingPage() {
 
   const totalFee = cdtList.reduce((acc, item) => acc + item.fee, 0);
   const unmatchedFindingsCount = (summaryReport?.recommendations || []).filter((r: any) => !r.code).length;
+
+  if (patientId === null) {
+    return (
+      <div>
+        <div className="page-header">
+          <div className="page-title">Billing &amp; Revenue</div>
+          <div className="page-sub">Choose a patient to review their billing.</div>
+        </div>
+        {patientsError && (
+          <div style={{ fontSize: '12.5px', color: 'var(--red-c, #A03030)', marginBottom: '16px' }}>
+            {patientsError}
+          </div>
+        )}
+        {loadingPatients ? (
+          <div style={{ fontSize: '12px', color: 'var(--ink3)' }}>Loading patients…</div>
+        ) : patients.length === 0 && !patientsError ? (
+          <div className="card" style={{ textAlign: 'center', padding: '32px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--ink3)', marginBottom: '16px' }}>
+              No patients yet — add one first.
+            </div>
+            <button className="btn-primary" onClick={() => router.push('/dashboard/patients')}>
+              Go to Patients
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: '1fr' }}>
+            {patients.map(p => (
+              <div
+                key={p.id}
+                className="patient-card"
+                onClick={() => router.push(`/dashboard/billing?patientId=${p.id}`)}
+                style={{ cursor: 'pointer' }}
+              >
+                <div className="patient-avatar">{formatPatientName(p).split(' ').map(n => n[0]).join('').toUpperCase()}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="patient-name">{formatPatientName(p)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
