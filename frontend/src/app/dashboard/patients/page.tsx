@@ -52,7 +52,7 @@ export default function PatientsPage() {
       if (!matchesSearch) return false;
 
       if (activeFilter === 'All') return true;
-      if (activeFilter === 'Today') return isToday(p.created_at);
+      if (activeFilter === 'Today') return !!p.last_visit_at && isToday(p.last_visit_at);
       if (activeFilter === 'High Risk') return p.risk_level === 'high';
       if (activeFilter === 'Perio') return notes.includes('perio');
 

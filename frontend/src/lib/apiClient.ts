@@ -103,6 +103,10 @@ export interface Patient {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  // Most recent session's created_at, or null if never recorded — powers
+  // the "Today" filter (which patient was actually seen today, not which
+  // patient profile happens to have been created today).
+  last_visit_at?: string | null;
 }
 
 export interface PatientCreatePayload {
