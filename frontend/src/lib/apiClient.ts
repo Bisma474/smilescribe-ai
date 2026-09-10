@@ -165,6 +165,12 @@ export const patientsApi = {
 
 export const sessionsApi = {
   getActive: (patientId: number) => request<ClinicalSession>(`/transcription/session/${patientId}`),
+  // A patient can have many sessions now (one per recording) — this lists
+  // all of them, most recent first, for the patient detail page's history.
+  history: (patientId: number) => request<ClinicalSession[]>(`/transcription/session/${patientId}/history`),
+  // Fetch one specific past session by id, rather than always the
+  // patient's latest one (which is what getActive returns).
+  getById: (sessionId: number) => request<ClinicalSession>(`/transcription/session/by-id/${sessionId}`),
   save: (payload: Partial<ClinicalSession>) =>
     request<ClinicalSession>('/transcription/session', { method: 'POST', body: JSON.stringify(payload) }),
   update: (sessionId: number, payload: Partial<ClinicalSession>) =>
