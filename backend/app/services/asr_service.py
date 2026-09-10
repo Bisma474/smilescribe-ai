@@ -36,13 +36,28 @@ def transcribe_audio(file_bytes: bytes, filename: str) -> dict:
         file=(filename, file_obj, content_type),
         model="whisper-large-v3",
         response_format="verbose_json",
+        # Without this, verbose_json still returns segment-level timing but
+        # segments[].words comes back empty — confirmed live: diarization's
+        # word/speaker-turn merge (diarization_service.merge_with_transcript)
+        # silently produced nothing until this was added.
+        timestamp_granularities=["word"],
         prompt=DENTAL_PROMPT,
         language="en",
     )
 
     text = response.text.strip()
     words = []
-    if hasattr(response, "segments"):
+    if hasattr(response, "words") and response.words:
+        # Groq returns top-level `words` when timestamp_granularities
+        # includes "word" — segments[].words is a separate (and, per the
+        # above, unreliable) field.
+        for w in response.words:
+            words.append({
+                "word": w.word.strip() if hasattr(w, "word") else w["word"].strip(),
+                "start": w.start if hasattr(w, "start") else w["start"],
+                "end": w.end if hasattr(w, "end") else w["end"],
+            })
+    elif hasattr(response, "segments"):
         for seg in response.segments:
             if hasattr(seg, "words") and seg.words:
                 for w in seg.words:
