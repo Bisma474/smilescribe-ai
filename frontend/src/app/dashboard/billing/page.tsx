@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { patientsApi, sessionsApi, logsApi, type Patient } from '@/lib/apiClient';
+import { patientsApi, sessionsApi, logsApi, workflowApi, type Patient } from '@/lib/apiClient';
 import { patientName as formatPatientName, patientMeta as formatPatientMeta } from '@/lib/patientDisplay';
 import { useAuth } from '@/store/AuthContext';
 
@@ -29,6 +29,8 @@ function BillingContent() {
   const [summaryReport, setSummaryReport] = useState<any>(null);
 
   const [allFindingsList, setAllFindingsList] = useState<CdtItem[]>([]);
+  const [confirmedProcedures, setConfirmedProcedures] = useState<any[]>([]);
+  const [codingSaving, setCodingSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
@@ -86,6 +88,7 @@ function BillingContent() {
           ? await sessionsApi.getById(sessIdFromUrl)
           : await sessionsApi.getActive(patientId);
         setSessionId(session.id);
+        setConfirmedProcedures(session.clinician_confirmed_procedures || []);
         
         let mapped: CdtItem[] = [];
 
@@ -154,6 +157,8 @@ function BillingContent() {
     }
   };
 
+  const addCommonProcedure = async (procedure: any) => { if (!sessionId) return; const next = [...confirmedProcedures, procedure]; setCodingSaving(true); try { const updated = await workflowApi.saveConfirmedProcedures(sessionId, next); setConfirmedProcedures(updated.clinician_confirmed_procedures || next); setToastMessage('Completed procedure added to this visit.'); } finally { setCodingSaving(false); } };
+
   const handleSubmitClaim = async () => {
     try {
       setSubmitting(true);
@@ -179,7 +184,7 @@ function BillingContent() {
 
   const matchedCdtList = allFindingsList.filter(item => item.code !== null);
   const unmatchedFindingsList = allFindingsList.filter(item => item.code === null);
-  const totalFee = matchedCdtList.reduce((acc, item) => acc + item.fee, 0);
+  const totalFee = confirmedProcedures.reduce((acc, item) => acc + (item.fee || 0), 0);
 
   if (patientId === null) {
     return (
@@ -279,7 +284,7 @@ function BillingContent() {
             &larr; Switch Patient
           </button>
           <button className="btn-sm btn-ghost" disabled={submitting} onClick={() => handleAction('Visit claim exported successfully.', 'Exported')}>Export Claim</button>
-          <button className="btn-sm btn-teal" disabled={submitting} onClick={handleSubmitClaim}>
+          <button className="btn-sm btn-teal" disabled={submitting || confirmedProcedures.length === 0} onClick={handleSubmitClaim}>
             {submitting ? 'Submitting...' : 'Submit to Insurance →'}
           </button>
         </div>
@@ -313,6 +318,14 @@ function BillingContent() {
               <div className="stat-card"><div className="stat-val teal">{`$${totalFee}`}</div><div className="stat-lbl">Total Fee</div></div>
             </div>
 
+            <div className="card" style={{marginBottom:'16px'}}>
+              <div style={{fontSize:'13px',fontWeight:700,color:'var(--navy)',marginBottom:'8px'}}>Add completed service</div>
+              <div style={{fontSize:'11px',color:'var(--ink3)',marginBottom:'10px'}}>Select only work completed during this visit.</div>
+              <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
+                {[['D0150','Comprehensive exam',85],['D1110','Prophylaxis',95],['D0274','Bitewing x-rays',65],['D1206','Fluoride varnish',48],['D1330','Oral hygiene instruction',29]].map(([code,desc,fee]) => <button key={String(code)} className="btn-sm btn-ghost" disabled={codingSaving} onClick={() => addCommonProcedure({code,description:desc,fee,status:'confirmed'})}>{desc}</button>)}
+              </div>
+              {confirmedProcedures.length > 0 && <div style={{marginTop:'12px',fontSize:'12px',color:'var(--teal-dark)'}}>{confirmedProcedures.map(item => item.code + ' · ' + item.description).join('  |  ')}</div>}
+            </div>
             {/* CDT table */}
             <div style={{border:'1px solid var(--border)',borderRadius:'8px',overflow:'hidden',background:'var(--white)'}}>
               {/* Header row */}
@@ -381,7 +394,7 @@ function BillingContent() {
             )}
 
             <div style={{display:'flex',flexDirection:'column',gap:'8px',marginTop:'20px'}}>
-              <button className="btn-primary" disabled={submitting} onClick={handleSubmitClaim}>
+              <button className="btn-primary" disabled={submitting || confirmedProcedures.length === 0} onClick={handleSubmitClaim}>
                 {submitting ? 'Submitting claim...' : 'Submit Visit & Return to Dashboard'}
               </button>
               <button className="btn-outline" disabled={submitting} onClick={() => handleAction('Visit details saved as draft.', 'Draft Saved')}>Save as Draft</button>

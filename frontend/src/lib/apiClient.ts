@@ -156,6 +156,7 @@ export interface ClinicalSession {
   summary_report?: any;
   error_message?: string | null;
   ai_note?: any;
+  clinician_confirmed_procedures?: any[];
   created_at: string;
 }
 
@@ -219,6 +220,11 @@ export const sessionsApi = {
     request<ClinicalSession>('/workflow/session/' + sessionId + '/generate-ai-note', { method: 'POST' }),
   swapSpeakers: (sessionId: number) =>
     request<ClinicalSession>(`/transcription/session/${sessionId}/swap-speakers`, { method: 'PATCH' }),
+};
+
+export const workflowApi = {
+  saveConfirmedProcedures: (sessionId: number, procedures: any[]) =>
+    request<ClinicalSession>('/workflow/session/' + sessionId + '/confirmed-procedures', { method: 'PUT', body: JSON.stringify(procedures) }),
 };
 
 export const logsApi = {
