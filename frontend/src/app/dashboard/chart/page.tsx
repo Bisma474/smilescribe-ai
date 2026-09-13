@@ -882,7 +882,7 @@ function ChartContent() {
           <div style={{flex:1,overflowY:'auto',padding:'8px 0',maxHeight:activeTab === 'transcript' ? 'calc(100vh - 290px)' : '400px'}}>
             <div style={{padding:'8px 16px',fontSize:'12.5px',color:'var(--ink)',lineHeight:1.7}}>
               {splitTranscriptTurns(transcript).map((turn, index, turns) => (
-                <div key={turn.speaker + '-' + index} onMouseEnter={() => { const entry = clinicalEntries.find(item => item.segments?.[0]?.quote && turn.text.includes(item.segments[0].quote)); if (entry?.segments?.[0]?.quote) setHoveredQuote(entry.segments[0].quote); }} onMouseLeave={() => setHoveredQuote(null)} style={{padding:'8px 0',borderBottom:index === turns.length - 1 ? 'none' : '1px solid rgba(27,58,107,0.08)',cursor:'default'}}>
+                <div key={turn.speaker + '-' + index} onMouseEnter={() => { const entry = clinicalEntries.find(item => item.segments?.[0]?.quote && normaliseEvidence(turn.text).includes(normaliseEvidence(item.segments[0].quote))); if (entry?.segments?.[0]?.quote) setHoveredQuote(entry.segments[0].quote); }} onMouseLeave={() => setHoveredQuote(null)} style={{padding:'8px 0',borderBottom:index === turns.length - 1 ? 'none' : '1px solid rgba(27,58,107,0.08)',cursor:'default'}}>
                   {turn.speaker && (
                     <span style={{display:'inline-block',minWidth:'62px',marginRight:'8px',fontSize:'10px',fontWeight:800,letterSpacing:'0.06em',color:turn.speaker === 'Dentist' ? 'var(--teal-dark)' : 'var(--navy-mid)'}}>
                       {turn.speaker.toUpperCase()}
@@ -927,6 +927,8 @@ function splitTranscriptTurns(transcript: string): TranscriptTurn[] {
   }
   return turns;
 }
+
+function normaliseEvidence(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
 
 function renderTranscriptWithHighlight(transcript: string, hoveredQuote: string | null) {
   if (!hoveredQuote) return transcript;
