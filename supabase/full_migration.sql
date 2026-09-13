@@ -43,6 +43,7 @@ CREATE POLICY "users_select_own" ON users
     FOR SELECT USING (id::text = auth.uid()::text);
 
 CREATE POLICY "service_role_all" ON users
+    TO service_role
     USING (TRUE)
     WITH CHECK (TRUE);
 

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback, ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { request } from "@/lib/apiClient";
 
 type TranscriptSegment = {
   id: string;
@@ -34,7 +35,6 @@ type ApiChartEntry = {
   pageindex_context?: string;
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
 function normalize(value: string) {
   return value.toLowerCase();
@@ -47,12 +47,14 @@ function parseTranscript(text: string): TranscriptSegment[] {
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const drMatch = trimmed.match(/^DR:\s?(.*)/i);
-    const ptMatch = trimmed.match(/^PT:\s?(.*)/i);
+    const drMatch = trimmed.match(/^(DR|Dentist):\s?(.*)/i);
+    const ptMatch = trimmed.match(/^(PT|Patient):\s?(.*)/i);
     if (drMatch) {
-      segments.push({ id: `seg-${idx++}`, speaker: "DR", text: drMatch[1] });
+      segments.push({ id: `seg-${idx++}`, speaker: "DR", text: drMatch[2] });
     } else if (ptMatch) {
-      segments.push({ id: `seg-${idx++}`, speaker: "PT", text: ptMatch[1] });
+      segments.push({ id: `seg-${idx++}`, speaker: "PT", text: ptMatch[2] });
+    } else {
+      segments.push({ id: `seg-${idx++}`, speaker: "DR", text: trimmed });
     }
   }
   return segments;
@@ -99,9 +101,7 @@ export default function CitationWorkspace() {
     setIsLoadingTranscript(true);
     setStatusText("Loading demo transcript from backend...");
     try {
-      const res = await fetch(`${API_BASE}/poc/demo-transcript`);
-      if (!res.ok) throw new Error("Failed to load demo transcript");
-      const data = await res.json();
+      const data = await request<{ transcript: string }>("/review/demo-transcript");
       const transcript = data.transcript || "";
       setFullTranscript(transcript);
       const segments = parseTranscript(transcript);
@@ -132,13 +132,11 @@ DR: After scaling, I will apply fluoride varnish on all surfaces.`;
     setStatusText("Extracting chart entries via AI...");
 
     try {
-      const res = await fetch(`${API_BASE}/poc/extract-chart`, {
+      const data = await request<{ entries: ApiChartEntry[] }>("/review/extract-chart", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transcript: fullTranscript, pageindex_context: "" }),
       });
-      if (!res.ok) throw new Error("Extraction failed");
-      const data = await res.json();
       const entries = buildChartEntries(data.entries || []);
       setChartEntries(entries);
       if (entries.length > 0) {
@@ -226,7 +224,7 @@ DR: After scaling, I will apply fluoride varnish on all surfaces.`;
           <span
             key={`${entry.id}-${idx}`}
             ref={(node) => { citationRefs.current[entry.id] = node; }}
-            className={`poc-citation${isActive ? " active" : ""}`}
+            className={`review-citation${isActive ? " active" : ""}`}
             onMouseEnter={() => setActiveEntryId(entry.id)}
             onClick={() => setActiveEntryId(entry.id)}
             title={`Evidence for ${entry.finding}`}
@@ -249,53 +247,53 @@ DR: After scaling, I will apply fluoride varnish on all surfaces.`;
   };
 
   return (
-    <main className="poc-page">
+    <main className="review-page">
       <style>{`
-        .poc-page{min-height:100vh;background:var(--surface);padding:24px 16px 56px}
-        .poc-shell{max-width:1180px;margin:0 auto}
-        .poc-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px}
-        .poc-actions{display:flex;gap:8px;flex-wrap:wrap}
-        .poc-status{margin-bottom:16px;padding:10px 12px;border:1px solid rgba(74,191,176,.25);background:var(--teal-xpale);border-radius:12px;font-size:12px;color:var(--ink2);display:flex;align-items:center;gap:8px}
-        .poc-status-dot{width:8px;height:8px;border-radius:50%;background:var(--teal);flex-shrink:0}
-        .poc-status-dot.loading{animation:poc-pulse 1s ease-in-out infinite}
-        @keyframes poc-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.75)}}
-        .poc-grid{display:grid;grid-template-columns:minmax(280px,380px) minmax(0,1fr);gap:16px;align-items:start}
-        .poc-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);overflow:hidden}
-        .poc-card-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--white)}
-        .poc-card-title{font-size:13px;font-weight:800;color:var(--navy)}
-        .poc-entry{width:100%;border:0;background:transparent;text-align:left;padding:14px 16px;border-bottom:1px solid var(--border);cursor:pointer;display:grid;grid-template-columns:48px minmax(0,1fr);gap:12px;transition:background .15s,border-color .15s}
-        .poc-entry:hover,.poc-entry.active{background:var(--teal-xpale)}
-        .poc-entry.active{box-shadow:inset 3px 0 0 var(--teal)}
-        .poc-tooth{width:44px;height:44px;border-radius:10px;border:1px solid var(--border2);background:var(--surface);display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:12px;font-weight:800;color:var(--navy)}
-        .poc-entry-title{font-size:13px;font-weight:800;color:var(--ink);line-height:1.25}
-        .poc-entry-detail{font-size:11px;color:var(--ink3);line-height:1.5;margin-top:3px}
-        .poc-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-        .poc-pill{font-size:10px;font-weight:800;border-radius:999px;padding:3px 8px;background:var(--teal-pale);color:var(--teal-dark)}
-        .poc-pill.navy{background:rgba(27,58,107,.1);color:var(--navy)}
-        .poc-pill.warn{background:#FEF3E2;color:#A0560A}
-        .poc-transcript{max-height:620px;overflow:auto;padding:8px 0;scroll-behavior:smooth}
-        .poc-segment{padding:11px 18px;border-bottom:1px solid rgba(27,58,107,.06)}
-        .poc-speaker{font-size:10px;font-weight:900;letter-spacing:.08em;margin-bottom:4px;color:var(--teal-dark)}
-        .poc-speaker.patient{color:var(--navy-mid)}
-        .poc-text{font-size:14px;line-height:1.75;color:var(--ink)}
-        .poc-citation{background:#fff2a8;border-bottom:2px solid #d9a900;border-radius:4px;padding:1px 3px;cursor:pointer;transition:background .15s,box-shadow .15s}
-        .poc-citation.active{background:#ffd84d;box-shadow:0 0 0 4px rgba(255,216,77,.35)}
-        .poc-source{padding:14px 16px;background:var(--teal-xpale);border-top:1px solid var(--border);font-size:12px;line-height:1.6;color:var(--ink2)}
-        .poc-source strong{color:var(--navy)}
-        @media(max-width:860px){.poc-grid{grid-template-columns:1fr}.poc-transcript{max-height:520px}}
-        .poc-spinner{width:16px;height:16px;border:2px solid var(--teal-pale);border-top-color:var(--teal);border-radius:50%;animation:poc-spin .6s linear infinite;display:inline-block}
-        @keyframes poc-spin{to{transform:rotate(360deg)}}
+        .review-page{min-height:100vh;background:var(--surface);padding:24px 16px 56px}
+        .review-shell{max-width:1180px;margin:0 auto}
+        .review-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+        .review-actions{display:flex;gap:8px;flex-wrap:wrap}
+        .review-status{margin-bottom:16px;padding:10px 12px;border:1px solid rgba(74,191,176,.25);background:var(--teal-xpale);border-radius:12px;font-size:12px;color:var(--ink2);display:flex;align-items:center;gap:8px}
+        .review-status-dot{width:8px;height:8px;border-radius:50%;background:var(--teal);flex-shrink:0}
+        .review-status-dot.loading{animation:review-pulse 1s ease-in-out infinite}
+        @keyframes review-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.75)}}
+        .review-grid{display:grid;grid-template-columns:minmax(280px,380px) minmax(0,1fr);gap:16px;align-items:start}
+        .review-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);overflow:hidden}
+        .review-card-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--white)}
+        .review-card-title{font-size:13px;font-weight:800;color:var(--navy)}
+        .review-entry{width:100%;border:0;background:transparent;text-align:left;padding:14px 16px;border-bottom:1px solid var(--border);cursor:pointer;display:grid;grid-template-columns:48px minmax(0,1fr);gap:12px;transition:background .15s,border-color .15s}
+        .review-entry:hover,.review-entry.active{background:var(--teal-xpale)}
+        .review-entry.active{box-shadow:inset 3px 0 0 var(--teal)}
+        .review-tooth{width:44px;height:44px;border-radius:10px;border:1px solid var(--border2);background:var(--surface);display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:12px;font-weight:800;color:var(--navy)}
+        .review-entry-title{font-size:13px;font-weight:800;color:var(--ink);line-height:1.25}
+        .review-entry-detail{font-size:11px;color:var(--ink3);line-height:1.5;margin-top:3px}
+        .review-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+        .review-pill{font-size:10px;font-weight:800;border-radius:999px;padding:3px 8px;background:var(--teal-pale);color:var(--teal-dark)}
+        .review-pill.navy{background:rgba(27,58,107,.1);color:var(--navy)}
+        .review-pill.warn{background:#FEF3E2;color:#A0560A}
+        .review-transcript{max-height:620px;overflow:auto;padding:8px 0;scroll-behavior:smooth}
+        .review-segment{padding:11px 18px;border-bottom:1px solid rgba(27,58,107,.06)}
+        .review-speaker{font-size:10px;font-weight:900;letter-spacing:.08em;margin-bottom:4px;color:var(--teal-dark)}
+        .review-speaker.patient{color:var(--navy-mid)}
+        .review-text{font-size:14px;line-height:1.75;color:var(--ink)}
+        .review-citation{background:#fff2a8;border-bottom:2px solid #d9a900;border-radius:4px;padding:1px 3px;cursor:pointer;transition:background .15s,box-shadow .15s}
+        .review-citation.active{background:#ffd84d;box-shadow:0 0 0 4px rgba(255,216,77,.35)}
+        .review-source{padding:14px 16px;background:var(--teal-xpale);border-top:1px solid var(--border);font-size:12px;line-height:1.6;color:var(--ink2)}
+        .review-source strong{color:var(--navy)}
+        @media(max-width:860px){.review-grid{grid-template-columns:1fr}.review-transcript{max-height:520px}}
+        .review-spinner{width:16px;height:16px;border:2px solid var(--teal-pale);border-top-color:var(--teal);border-radius:50%;animation:review-spin .6s linear infinite;display:inline-block}
+        @keyframes review-spin{to{transform:rotate(360deg)}}
       `}</style>
 
-      <div className="poc-shell">
-        <header className="poc-header">
+      <div className="review-shell">
+        <header className="review-header">
           <div>
             <div className="page-title">Citation Workspace</div>
             <div className="page-sub">
-              POC for chart entries linked to exact transcript evidence via backend API.
+              Review AI-extracted chart entries alongside the exact transcript evidence that supports each finding.
             </div>
           </div>
-          <div className="poc-actions">
+          <div className="review-actions">
             <button className="btn-sm btn-ghost" type="button" onClick={() => router.push("/dashboard")}>
               Dashboard
             </button>
@@ -304,21 +302,21 @@ DR: After scaling, I will apply fluoride varnish on all surfaces.`;
             </button>
             <button className="btn-sm btn-teal" type="button" onClick={handleExtractChart} disabled={isExtracting || !fullTranscript}>
               {isExtracting ? (
-                <><span className="poc-spinner" /> Extracting...</>
+                <><span className="review-spinner" /> Extracting...</>
               ) : "Extract Chart"}
             </button>
           </div>
         </header>
 
-        <div className="poc-status" aria-live="polite">
-          <span className={`poc-status-dot${isExtracting ? " loading" : ""}`} />
+        <div className="review-status" aria-live="polite">
+          <span className={`review-status-dot${isExtracting ? " loading" : ""}`} />
           {statusText}
         </div>
 
-        <section className="poc-grid">
-          <div className="poc-card">
-            <div className="poc-card-head">
-              <div className="poc-card-title">Chart Entries</div>
+        <section className="review-grid">
+          <div className="review-card">
+            <div className="review-card-head">
+              <div className="review-card-title">Chart Entries</div>
               <span className="badge badge-teal">{chartEntries.length} cited</span>
             </div>
 
@@ -330,28 +328,28 @@ DR: After scaling, I will apply fluoride varnish on all surfaces.`;
 
             {chartEntries.map((entry) => (
               <button
-                className={`poc-entry${entry.id === activeEntryId ? " active" : ""}`}
+                className={`review-entry${entry.id === activeEntryId ? " active" : ""}`}
                 key={entry.id}
                 type="button"
                 onMouseEnter={() => setActiveEntryId(entry.id)}
                 onClick={() => setActiveEntryId(entry.id)}
               >
-                <span className="poc-tooth">{entry.tooth_number || "?"}</span>
+                <span className="review-tooth">{entry.tooth_number || "?"}</span>
                 <span>
-                  <span className="poc-entry-title">{entry.finding}</span>
-                  <span className="poc-entry-detail">{entry.detail}</span>
-                  <span className="poc-meta">
-                    <span className={`poc-pill${confidenceColor(entry.confidence) ? " " + confidenceColor(entry.confidence) : ""}`}>
+                  <span className="review-entry-title">{entry.finding}</span>
+                  <span className="review-entry-detail">{entry.detail}</span>
+                  <span className="review-meta">
+                    <span className={`review-pill${confidenceColor(entry.confidence) ? " " + confidenceColor(entry.confidence) : ""}`}>
                       {entry.confidence}% confidence
                     </span>
-                    {entry.surface && <span className="poc-pill navy">Surface {entry.surface}</span>}
+                    {entry.surface && <span className="review-pill navy">Surface {entry.surface}</span>}
                   </span>
                 </span>
               </button>
             ))}
 
             {activeEntry && chartEntries.length > 0 && (
-              <div className="poc-source">
+              <div className="review-source">
                 <strong>Active source:</strong> {activeEntry.pageindex_context || "No PageIndex context"}
                 <br />
                 <strong>Evidence:</strong> &ldquo;{activeEntry.verbatim_quote}&rdquo;
@@ -359,23 +357,23 @@ DR: After scaling, I will apply fluoride varnish on all surfaces.`;
             )}
           </div>
 
-          <div className="poc-card">
-            <div className="poc-card-head">
-              <div className="poc-card-title">Transcript Evidence</div>
+          <div className="review-card">
+            <div className="review-card-head">
+              <div className="review-card-title">Transcript Evidence</div>
               <span className="badge badge-navy">hover or click</span>
             </div>
-            <div className="poc-transcript">
+            <div className="review-transcript">
               {transcriptSegments.length === 0 && (
                 <div style={{ padding: "32px 18px", textAlign: "center", fontSize: 12, color: "var(--ink4)" }}>
                   No transcript loaded. Click "Use Demo Transcript" above.
                 </div>
               )}
               {transcriptSegments.map((segment) => (
-                <article className="poc-segment" key={segment.id}>
-                  <div className={`poc-speaker${segment.speaker === "PT" ? " patient" : ""}`}>
+                <article className="review-segment" key={segment.id}>
+                  <div className={`review-speaker${segment.speaker === "PT" ? " patient" : ""}`}>
                     {segment.speaker === "DR" ? "DR. KIM" : "PATIENT"}
                   </div>
-                  <div className="poc-text">{renderSegmentText(segment)}</div>
+                  <div className="review-text">{renderSegmentText(segment)}</div>
                 </article>
               ))}
             </div>

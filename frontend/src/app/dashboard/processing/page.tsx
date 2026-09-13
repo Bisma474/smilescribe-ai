@@ -56,7 +56,16 @@ export default function ProcessingPage() {
         return;
       }
 
+      let attempts = 0;
+      // The UI's own copy says "usually 15-30 seconds" — if the backend
+      // job ever hangs (e.g. a network issue reaching Groq with no
+      // response), this stops the poll after 2 minutes instead of
+      // spinning on "Generating Chart" forever with no way out. The
+      // background job itself may still complete later; this only stops
+      // this page from waiting on it indefinitely.
+      const MAX_ATTEMPTS = 60;
       pollRef.current = setInterval(async () => {
+        attempts += 1;
         try {
           const session = await sessionsApi.getActive(Number(patientId));
           if (session.status === 'complete') {
@@ -66,6 +75,10 @@ export default function ProcessingPage() {
           } else if (session.status === 'error') {
             if (pollRef.current) clearInterval(pollRef.current);
             setErrorMessage(session.error_message || 'Processing failed.');
+            setPhase('error');
+          } else if (attempts >= MAX_ATTEMPTS) {
+            if (pollRef.current) clearInterval(pollRef.current);
+            setErrorMessage('This is taking longer than expected. It may still finish in the background — check the Chart page shortly, or try recording again.');
             setPhase('error');
           }
         } catch (err) {
@@ -91,6 +104,11 @@ export default function ProcessingPage() {
           <button className="btn-outline" onClick={() => router.push(`/dashboard/recording?patientId=${patientId}`)}>
             Record Again
           </button>
+          {patientId && (
+            <button className="btn-primary" onClick={() => router.push(`/dashboard/chart?patientId=${patientId}`)}>
+              Check Chart
+            </button>
+          )}
         </div>
       </div>
     );

@@ -5,6 +5,7 @@ from app.models.patient import Patient as PatientModel
 from app.models.user import User
 from app.models.session import ClinicalSession as SessionModel
 from app.schemas.session import ClinicalSessionUpdate, ClinicalSessionOut
+from app.services.audit_timeline_service import append_audit_event
 
 router = APIRouter()
 
@@ -30,7 +31,13 @@ def update_session(
         raise HTTPException(status_code=404, detail="Session not found")
 
     if body.status is not None:
+        if session.status == "submitted":
+            raise HTTPException(status_code=409, detail="This visit was already submitted and cannot be submitted again.")
+        if body.status == "submitted" and not (session.clinician_confirmed_procedures or []):
+            raise HTTPException(status_code=422, detail="Add and confirm at least one completed procedure before submitting.")
         session.status = body.status
+        if body.status == "submitted":
+            append_audit_event(session, "visit_submitted", "Submitted visit for billing.")
     if body.transcript is not None:
         session.transcript = body.transcript
     if body.perio_data is not None:
@@ -39,6 +46,20 @@ def update_session(
         session.clinical_entries = body.clinical_entries
     if body.summary_report is not None:
         session.summary_report = body.summary_report
+    if body.treatment_opportunities is not None:
+        session.treatment_opportunities = body.treatment_opportunities
+    if body.candidate_procedures is not None:
+        session.candidate_procedures = body.candidate_procedures
+    if body.clinician_confirmed_procedures is not None:
+        session.clinician_confirmed_procedures = body.clinician_confirmed_procedures
+    if body.ai_note is not None:
+        session.ai_note = body.ai_note
+    if body.patient_summary is not None:
+        session.patient_summary = body.patient_summary
+    if body.medications_allergies is not None:
+        session.medications_allergies = body.medications_allergies
+    if body.follow_up_draft is not None:
+        session.follow_up_draft = body.follow_up_draft
 
     db.commit()
     db.refresh(session)

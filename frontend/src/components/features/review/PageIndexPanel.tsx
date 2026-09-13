@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { request } from "@/lib/apiClient";
 
 type TreeNode = {
   name: string;
@@ -18,18 +19,18 @@ function TreeNodeItem({ node, depth }: { node: TreeNode; depth: number }) {
   return (
     <li>
       <div
-        className="poc-pi-node"
+        className="review-pi-node"
         style={{ paddingLeft: `${8 + depth * 16}px` }}
       >
         {hasChildren ? (
           <span
-            className={`poc-pi-toggle${open ? " open" : ""}`}
+            className={`review-pi-toggle${open ? " open" : ""}`}
             onClick={() => setOpen(!open)}
           >
             ▶
           </span>
         ) : (
-          <span className="poc-pi-leaf-icon">•</span>
+          <span className="review-pi-leaf-icon">•</span>
         )}
         <span>{node.name || node.title}</span>
       </div>
@@ -53,7 +54,6 @@ function countNodes(nodes: TreeNode[]): number {
   return count;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
 export default function PageIndexPanel() {
   const [expanded, setExpanded] = useState(true);
@@ -63,9 +63,7 @@ export default function PageIndexPanel() {
   const fetchTree = useCallback(async () => {
     setTreeLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/poc/pageindex/tree`);
-      if (!res.ok) throw new Error("Failed to fetch tree");
-      const data = await res.json();
+      const data = await request<{ tree: TreeNode[] }>("/review/pageindex/tree");
       setTree(data.tree || []);
     } catch {
       setTree([]);
@@ -78,10 +76,10 @@ export default function PageIndexPanel() {
   }, [fetchTree]);
 
   return (
-    <section className="poc-pi-panel">
-      <div className="poc-card-head" onClick={() => setExpanded(!expanded)}>
-        <div className="poc-card-title">
-          <span className={`poc-pi-arrow${expanded ? " open" : ""}`}>▶</span>
+    <section className="review-pi-panel">
+      <div className="review-card-head" onClick={() => setExpanded(!expanded)}>
+        <div className="review-card-title">
+          <span className={`review-pi-arrow${expanded ? " open" : ""}`}>▶</span>
           {" "}PageIndex Knowledge Tree
         </div>
         <span className="badge badge-teal">
@@ -90,9 +88,9 @@ export default function PageIndexPanel() {
       </div>
 
       {expanded && (
-        <div className="poc-pi-body">
+        <div className="review-pi-body">
           {tree.length === 0 && !treeLoading && (
-            <div className="poc-pi-empty">
+            <div className="review-pi-empty">
               No tree data available. The backend will return a mock dental knowledge tree.
             </div>
           )}
@@ -100,7 +98,7 @@ export default function PageIndexPanel() {
           {tree.length > 0 && (
             <div>
               <div className="section-label" style={{ marginBottom: 8 }}>Knowledge Structure</div>
-              <ul className="poc-pi-tree">
+              <ul className="review-pi-tree">
                 {tree.map((root) => (
                   <TreeNodeItem key={root.name || root.title || root.page_index} node={root} depth={0} />
                 ))}

@@ -1,7 +1,7 @@
 // Central API client — reads token from localStorage and attaches to every request
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
   // FormData bodies (file uploads) must NOT get an explicit Content-Type —
   // the browser sets one with the correct multipart boundary itself.
@@ -103,6 +103,10 @@ export interface Patient {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  // Most recent session's created_at, or null if never recorded — powers
+  // the "Today" filter (which patient was actually seen today, not which
+  // patient profile happens to have been created today).
+  last_visit_at?: string | null;
 }
 
 export interface PatientCreatePayload {
@@ -138,13 +142,41 @@ export interface ClinicalSession {
   patient_id: number;
   status: string;
   transcript?: string;
+  // How speaker labeling turned out for this session's transcript:
+  //   "success"     - transcript has "Dentist:"/"Patient:" speaker labels
+  //   "unavailable" - diarization was skipped or found only one speaker
+  //   "failed"      - diarization was attempted but errored out
+  //   "not_run"     - the recording pipeline hasn't reached this step yet
+  diarization_status?: 'success' | 'ai_assigned' | 'unavailable' | 'failed' | 'not_run';
+  // Whether the clinician has flipped the Dentist/Patient labels because
+  // the auto-detected order guessed wrong for this recording.
+  speakers_swapped?: boolean;
   perio_data?: any;
   clinical_entries?: any[];
   summary_report?: any;
   error_message?: string | null;
+  ai_note?: any;
+  clinician_confirmed_procedures?: any[];
+  medications_allergies?: any;
+  follow_up_draft?: any;
+  audit_timeline?: AuditTimelineEvent[];
+  patient_summary?: any;
   created_at: string;
 }
 
+export interface PracticeAnalytics {
+  completed_visits: number;
+  submitted_visits: number;
+  approved_notes: number;
+  approved_patient_summaries: number;
+  confirmed_procedures: number;
+  note_approval_rate: number;
+}
+export interface AuditTimelineEvent {
+  event: string;
+  detail: string;
+  occurred_at: string;
+}
 export interface AuditLog {
   id: number;
   timestamp: string;
@@ -161,10 +193,17 @@ export const patientsApi = {
   update: (id: number, payload: Partial<PatientCreatePayload>) =>
     request<Patient>(`/patients/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   dashboardStats: () => request<DashboardStats>('/patients/dashboard-stats'),
+  remove: (id: number) => request<void>('/patients/' + id, { method: 'DELETE' }),
 };
 
 export const sessionsApi = {
   getActive: (patientId: number) => request<ClinicalSession>(`/transcription/session/${patientId}`),
+  // A patient can have many sessions now (one per recording) — this lists
+  // all of them, most recent first, for the patient detail page's history.
+  history: (patientId: number) => request<ClinicalSession[]>(`/transcription/session/${patientId}/history`),
+  // Fetch one specific past session by id, rather than always the
+  // patient's latest one (which is what getActive returns).
+  getById: (sessionId: number) => request<ClinicalSession>(`/transcription/session/by-id/${sessionId}`),
   save: (payload: Partial<ClinicalSession>) =>
     request<ClinicalSession>('/transcription/session', { method: 'POST', body: JSON.stringify(payload) }),
   update: (sessionId: number, payload: Partial<ClinicalSession>) =>
@@ -191,6 +230,29 @@ export const sessionsApi = {
       body: formData,
     });
   },
+  // Flips the "Dentist:"/"Patient:" labels throughout the transcript —
+  // for when the auto-detected speaker order guessed wrong. Only valid
+  // once diarization_status is "success" (there's a labeled transcript
+  // to swap).
+  generateAiNote: (sessionId: number) =>
+    request<ClinicalSession>('/workflow/session/' + sessionId + '/generate-ai-note', { method: 'POST' }),
+  remove: (sessionId: number) => request<void>('/transcription/session/' + sessionId, { method: 'DELETE' }),
+  swapSpeakers: (sessionId: number) =>
+    request<ClinicalSession>(`/transcription/session/${sessionId}/swap-speakers`, { method: 'PATCH' }),
+};
+
+export const workflowApi = {
+  reviewTasks: () => request<any[]>('/workflow/review-tasks'),
+  analytics: () => request<PracticeAnalytics>('/workflow/analytics'),
+  saveConfirmedProcedures: (sessionId: number, procedures: any[]) =>
+    request<ClinicalSession>('/workflow/session/' + sessionId + '/confirmed-procedures', { method: 'PUT', body: JSON.stringify(procedures) }),
+  timeline: (sessionId: number) =>
+    request<AuditTimelineEvent[]>("/workflow/session/" + sessionId + "/timeline"),
+  generatePatientSummary: (sessionId: number) =>
+    request<ClinicalSession>("/workflow/session/" + sessionId + "/generate-patient-summary", { method: "POST" }),
+  generateFollowUp: (sessionId: number) => request<ClinicalSession>('/workflow/session/' + sessionId + '/generate-follow-up', { method: 'POST' }),
+  comparison: (sessionId: number) => request<any>('/workflow/session/' + sessionId + '/comparison'),
+  riskFlags: (sessionId: number) => request<any[]>('/workflow/session/' + sessionId + '/risk-flags'),
 };
 
 export const logsApi = {

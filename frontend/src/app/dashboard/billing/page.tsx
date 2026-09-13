@@ -1,39 +1,64 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { patientsApi, sessionsApi, logsApi } from '@/lib/apiClient';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { patientsApi, sessionsApi, logsApi, workflowApi, type Patient } from '@/lib/apiClient';
 import { patientName as formatPatientName, patientMeta as formatPatientMeta } from '@/lib/patientDisplay';
 import { useAuth } from '@/store/AuthContext';
 
 interface CdtItem {
-  code: string;
+  code: string | null;
   desc: string;
   conf: number;
   fee: number;
+  tooth?: string;
 }
 
-export default function BillingPage() {
+function BillingContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
-  
-  const [patientId, setPatientId] = useState<number>(2); // Default to Marcus Torres (2)
-  const [patientName, setPatientName] = useState<string>('Marcus Torres');
-  const [patientMeta, setPatientMeta] = useState<string>('DOB: 1981-03-14');
+
+  const pIdStr = searchParams.get('patientId');
+  const pIdFromUrl = pIdStr ? parseInt(pIdStr, 10) : NaN;
+  const hasValidUrlPatient = Boolean(pIdStr && !Number.isNaN(pIdFromUrl));
+
+  const [patientId, setPatientId] = useState<number | null>(hasValidUrlPatient ? pIdFromUrl : null);
+  const [patientName, setPatientName] = useState<string>('');
+  const [patientMeta, setPatientMeta] = useState<string>('');
   const [sessionId, setSessionId] = useState<number | null>(null);
+  const [sessionStatus, setSessionStatus] = useState('');
   const [summaryReport, setSummaryReport] = useState<any>(null);
 
-  const [cdtList, setCdtList] = useState<CdtItem[]>([]);
+  const [allFindingsList, setAllFindingsList] = useState<CdtItem[]>([]);
+  const [confirmedProcedures, setConfirmedProcedures] = useState<any[]>([]);
+  const [codingSaving, setCodingSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [loadingPatients, setLoadingPatients] = useState(false);
+  const [patientsError, setPatientsError] = useState('');
+
+  // Sync state when URL parameter changes
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const pIdStr = params.get('patientId');
-    const pId = pIdStr ? parseInt(pIdStr) : 2;
-    setPatientId(pId);
+    if (hasValidUrlPatient && pIdFromUrl !== patientId) {
+      setPatientId(pIdFromUrl);
+    }
+  }, [pIdStr, hasValidUrlPatient, pIdFromUrl, patientId]);
+
+  useEffect(() => {
+    if (!patientId) {
+      let cancelled = false;
+      setLoadingPatients(true);
+      patientsApi.list()
+        .then(list => { if (!cancelled) setPatients(list); })
+        .catch(err => { if (!cancelled) setPatientsError(err instanceof Error ? err.message : 'Failed to load patients.'); })
+        .finally(() => { if (!cancelled) setLoadingPatients(false); });
+      return () => { cancelled = true; };
+    }
 
     const loadData = async () => {
       try {
@@ -45,40 +70,55 @@ export default function BillingPage() {
           await logsApi.create({
             action: 'Access',
             user_name: user?.full_name || 'Dr. Alice Kim',
-            details: `Accessed patient billing page (ID: ${pId})`
+            details: `Accessed patient billing page (ID: ${patientId})`
           });
         } catch (lErr) {
           console.warn('Failed to write audit log:', lErr);
         }
 
         // 1. Fetch patient
-        const pt = await patientsApi.get(pId);
+        const pt = await patientsApi.get(patientId);
         setPatientName(formatPatientName(pt));
         setPatientMeta(formatPatientMeta(pt));
 
-        // 2. Fetch session
-        const session = await sessionsApi.getActive(pId);
-        setSessionId(session.id);
-        
-        if (session.summary_report) {
-          setSummaryReport(session.summary_report);
+        // 2. Fetch session — check URL sessionId first, otherwise fallback to latest active session
+        const sessIdStr = searchParams.get('sessionId');
+        const sessIdFromUrl = sessIdStr ? parseInt(sessIdStr, 10) : NaN;
 
-          // CDT codes come from the AI-suggested `recommendations` (every
-          // entry is pending dentist confirmation — nothing here has been
-          // auto-billed). Only entries with an actual matched code are
-          // shown; findings with no CDT match are visible on the Chart
-          // page's Summary tab but don't appear as a billable line here.
-          const recommendations = session.summary_report.recommendations || [];
-          const mapped: CdtItem[] = recommendations
-            .filter((r: any) => r.code)
-            .map((r: any) => ({
-              code: r.code,
-              desc: r.desc || 'Dental finding',
-              conf: r.conf || 0,
-              fee: r.fee || 0
-            }));
-          setCdtList(mapped);
+        const session = !Number.isNaN(sessIdFromUrl)
+          ? await sessionsApi.getById(sessIdFromUrl)
+          : await sessionsApi.getActive(patientId);
+        setSessionId(session.id);
+        setSessionStatus(session.status);
+        setConfirmedProcedures(session.clinician_confirmed_procedures || []);
+        
+        let mapped: CdtItem[] = [];
+
+        // Priority 1: Use summary_report.recommendations if available
+        if (session.summary_report && Array.isArray(session.summary_report.recommendations) && session.summary_report.recommendations.length > 0) {
+          setSummaryReport(session.summary_report);
+          mapped = session.summary_report.recommendations.map((r: any) => ({
+            code: r.code || null,
+            desc: r.desc || r.label || 'Dental finding',
+            conf: r.conf || 0,
+            fee: r.fee != null ? r.fee : 0,
+            tooth: r.tooth || undefined
+          }));
+        } 
+        
+        // Priority 2: Fallback to clinical_entries if recommendations is empty or summary_report is missing
+        if (mapped.length === 0 && session.clinical_entries && Array.isArray(session.clinical_entries) && session.clinical_entries.length > 0) {
+          mapped = session.clinical_entries.map((e: any) => ({
+            code: e.cdt || e.code || null,
+            desc: e.label || e.detail || 'Dental finding',
+            conf: e.conf || 0,
+            fee: e.fee != null ? e.fee : 0,
+            tooth: e.tooth || undefined
+          }));
         }
+
+        const uniqueMapped = mapped.filter((item, index, items) => items.findIndex(other => other.code === item.code && other.tooth === item.tooth && other.desc === item.desc) === index);
+        setAllFindingsList(uniqueMapped);
       } catch (err) {
         console.error('Failed to load billing data:', err);
         setError(err instanceof Error ? err.message : 'Failed to load billing data.');
@@ -88,7 +128,7 @@ export default function BillingPage() {
     };
 
     loadData();
-  }, [user]);
+  }, [user, patientId, searchParams]);
 
   // Auto-clear toast after 3 seconds
   useEffect(() => {
@@ -100,6 +140,10 @@ export default function BillingPage() {
     }
   }, [toastMessage]);
 
+  const handleSelectPatient = (id: number) => {
+    setPatientId(id);
+    router.push(`/dashboard/billing?patientId=${id}`);
+  };
 
   const handleAction = async (message: string, actionType: string) => {
     setToastMessage(message);
@@ -116,6 +160,32 @@ export default function BillingPage() {
     }
   };
 
+  const addCommonProcedure = async (procedure: any) => {
+    if (!sessionId) return;
+    if (confirmedProcedures.some(item => item.code === procedure.code && !item.tooth && !item.quadrant)) {
+      setToastMessage(`${procedure.code} is already selected for this visit.`);
+      return;
+    }
+    const next = [...confirmedProcedures, procedure];
+    setCodingSaving(true);
+    try {
+      const updated = await workflowApi.saveConfirmedProcedures(sessionId, next);
+      setConfirmedProcedures(updated.clinician_confirmed_procedures || next);
+      setToastMessage('Completed procedure added to this visit.');
+    } finally { setCodingSaving(false); }
+  };
+
+  const removeConfirmedProcedure = async (index: number) => {
+    if (!sessionId) return;
+    const next = confirmedProcedures.filter((_, itemIndex) => itemIndex !== index);
+    setCodingSaving(true);
+    try {
+      const updated = await workflowApi.saveConfirmedProcedures(sessionId, next);
+      setConfirmedProcedures(updated.clinician_confirmed_procedures || next);
+      setToastMessage('Completed procedure removed from this visit.');
+    } finally { setCodingSaving(false); }
+  };
+
   const handleSubmitClaim = async () => {
     try {
       setSubmitting(true);
@@ -123,6 +193,7 @@ export default function BillingPage() {
         await sessionsApi.update(sessionId, { status: 'submitted' });
       }
       
+      setSessionStatus('submitted');
       await handleAction('Claim submitted successfully to insurance.', 'Submitted');
       
       setTimeout(() => {
@@ -139,8 +210,63 @@ export default function BillingPage() {
     }
   };
 
-  const totalFee = cdtList.reduce((acc, item) => acc + item.fee, 0);
-  const unmatchedFindingsCount = (summaryReport?.recommendations || []).filter((r: any) => !r.code).length;
+  const matchedCdtList = allFindingsList.filter(item => item.code !== null);
+  const unmatchedFindingsList = allFindingsList.filter(item => item.code === null);
+  const totalFee = confirmedProcedures.reduce((acc, item) => acc + (item.fee || 0), 0);
+
+  if (patientId === null) {
+    return (
+      <div>
+        <div className="page-header">
+          <div className="page-title">Billing &amp; Revenue</div>
+          <div className="page-sub">Select a patient below to review their billing breakdown and insurance claims.</div>
+        </div>
+        {patientsError && (
+          <div style={{ fontSize: '12.5px', color: 'var(--red-c, #A03030)', marginBottom: '16px' }}>
+            {patientsError}
+          </div>
+        )}
+        {loadingPatients ? (
+          <div style={{ fontSize: '12px', color: 'var(--ink3)' }}>Loading patient directory…</div>
+        ) : patients.length === 0 && !patientsError ? (
+          <div className="card" style={{ textAlign: 'center', padding: '32px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--ink3)', marginBottom: '16px' }}>
+              No patients yet — add one first.
+            </div>
+            <button className="btn-primary" onClick={() => router.push('/dashboard/patients')}>
+              Go to Patients
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: '1fr' }}>
+            {patients.map(p => (
+              <div
+                key={p.id}
+                className="patient-card"
+                onClick={() => handleSelectPatient(p.id)}
+                style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '14px', padding: '14px 16px', background: 'var(--white)', border: '1px solid var(--border)', borderRadius: '10px' }}
+              >
+                <div className="patient-avatar" style={{ width: '38px', height: '38px', borderRadius: '50%', background: 'var(--teal-pale, #E8F7F5)', color: 'var(--teal-dark, #007A78)', fontWeight: 700, fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  {formatPatientName(p).split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="patient-name" style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--navy)' }}>
+                    {formatPatientName(p)}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--ink3)', marginTop: '2px' }}>
+                    {formatPatientMeta(p)} {p.notes ? `· ${p.notes}` : ''}
+                  </div>
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--teal-dark)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  Review Billing &rarr;
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -170,12 +296,24 @@ export default function BillingPage() {
       <div className="page-header" style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap',gap:'12px',marginBottom:'20px'}}>
         <div>
           <div className="page-title">Billing &amp; Revenue</div>
-          <div className="page-sub">{patientName} · {patientMeta.includes('DOB') ? patientMeta : `DOB: ${patientMeta}`} · Review and submit</div>
+          <div className="page-sub">
+            <span 
+              onClick={() => router.push(`/dashboard/chart?patientId=${patientId}${sessionId ? `&sessionId=${sessionId}` : ''}`)} 
+              style={{ cursor: 'pointer', textDecoration: 'underline', color: 'var(--navy)', fontWeight: 600 }}
+              title="Click to view Patient Chart Review"
+            >
+              {patientName || `Patient #${patientId}`}
+            </span>
+            {' · '}{patientMeta.includes('DOB') ? patientMeta : `DOB: ${patientMeta}`} · Review and submit
+          </div>
         </div>
         <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
+          <button className="btn-sm btn-ghost" onClick={() => { setPatientId(null); router.push('/dashboard/billing'); }}>
+            &larr; Switch Patient
+          </button>
           <button className="btn-sm btn-ghost" disabled={submitting} onClick={() => handleAction('Visit claim exported successfully.', 'Exported')}>Export Claim</button>
-          <button className="btn-sm btn-teal" disabled={submitting} onClick={handleSubmitClaim}>
-            {submitting ? 'Submitting...' : 'Submit to Insurance →'}
+          <button className="btn-sm btn-teal" disabled={submitting || sessionStatus === 'submitted' || confirmedProcedures.length === 0} onClick={handleSubmitClaim}>
+            {sessionStatus === 'submitted' ? 'Visit Submitted' : submitting ? 'Submitting...' : 'Submit to Insurance →'}
           </button>
         </div>
       </div>
@@ -194,75 +332,116 @@ export default function BillingPage() {
         </div>
       )}
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr',gap:'20px'}}>
-        <div>
-          <div className="stat-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:'20px'}}>
-            <div className="stat-card"><div className="stat-val teal">${totalFee}</div><div className="stat-lbl">Est. Value</div></div>
-            <div className="stat-card"><div className="stat-val">{cdtList.length}</div><div className="stat-lbl">CDT Codes</div></div>
-            <div className="stat-card"><div className="stat-val warn">{unmatchedFindingsCount}</div><div className="stat-lbl">Needs Coding</div></div>
-          </div>
-          
-          <div className="section-label mb-12">Assigned CDT Codes</div>
-          <div className="card" style={{padding:0,overflow:'hidden'}}>
-            <div style={{
-              padding:'10px 16px',
-              background:'var(--teal-xpale)',
-              borderBottom:'1px solid var(--border)',
-              display:'grid',
-              gridTemplateColumns:'80px 1fr 100px 60px',
-              gap:'12px',
-              fontSize:'10px',
-              fontWeight:700,
-              color:'var(--ink3)',
-              letterSpacing:'0.06em',
-              textTransform:'uppercase'
-            }}>
-              <div>Code</div><div>Description</div><div>Confidence</div><div style={{textAlign:'right'}}>Fee</div>
+      {loading ? (
+        <div style={{ padding: '36px', textAlign: 'center', color: 'var(--ink3)', fontSize: '13px' }}>
+          Loading patient billing details…
+        </div>
+      ) : (
+        <div style={{display:'grid',gridTemplateColumns:'1fr',gap:'20px'}}>
+          <div>
+            {/* Stat cards */}
+            <div className="stat-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:'20px'}}>
+              <div className="stat-card"><div className="stat-val">{matchedCdtList.length}</div><div className="stat-lbl">CDT Codes</div></div>
+              <div className="stat-card"><div className="stat-val warn">{unmatchedFindingsList.length}</div><div className="stat-lbl">Needs Coding</div></div>
+              <div className="stat-card"><div className="stat-val teal">{`$${totalFee}`}</div><div className="stat-lbl">Confirmed Total</div></div>
             </div>
-            
-            {cdtList.map((c,i) => (
-              <div key={`${c.code}-${i}`} style={{
-                display:'grid',
-                gridTemplateColumns:'80px 1fr 100px 60px',
-                alignItems:'center',
-                gap:'12px',
-                padding:'12px 16px',
-                borderBottom:i===cdtList.length-1?'none':'1px solid var(--border)'
-              }}>
-                <div className="cdt-code" style={{fontWeight:'700',color:'var(--navy)',fontFamily:'var(--font-mono)'}}>{c.code}</div>
-                <div className="cdt-desc" style={{fontSize:'12.5px',color:'var(--ink)'}}>{c.desc}</div>
-                <div style={{fontSize:'10px',color:'var(--ink3)',width:'100px',flexShrink:0}}>
-                  <div>{c.conf}%</div>
-                  <div className="conf-bar" style={{height:'4px',background:'var(--border)',borderRadius:'2px',marginTop:'4px',overflow:'hidden'}}>
-                    <div className="conf-fill" style={{height:'100%',background:'var(--teal)',width:`${c.conf}%`}}/>
-                  </div>
-                </div>
-                <div className="cdt-fee" style={{textAlign:'right',fontWeight:'700',color:'var(--navy)'}}>${c.fee}</div>
+
+            <div className="card" style={{marginBottom:'16px'}}>
+              <div style={{fontSize:'13px',fontWeight:700,color:'var(--navy)',marginBottom:'8px'}}>Add completed service</div>
+              <div style={{fontSize:'11px',color:'var(--ink3)',marginBottom:'10px'}}>Select only work completed during this visit.</div>
+              <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
+                {[['D0150','Comprehensive exam',85],['D0120','Periodic exam',65],['D0140','Problem-focused exam',75],['D0180','Comprehensive periodontal evaluation',120],['D1110','Prophylaxis',95],['D0274','Bitewing x-rays',65],['D0210','Full-mouth x-rays',150],['D0330','Panoramic x-ray',110],['D1206','Fluoride varnish',48],['D1330','Oral hygiene instruction',29]].map(([code,desc,fee]) => <button key={String(code)} className="btn-sm btn-ghost" disabled={codingSaving} onClick={() => addCommonProcedure({code,description:desc,fee,status:'confirmed'})}>{desc}</button>)}
               </div>
-            ))}
-            
-            <div style={{padding:'12px 16px',borderTop:'1px solid var(--border)',background:'var(--surface)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              <div style={{fontSize:'12px',fontWeight:700,color:'var(--navy)'}}>Subtotal</div>
-              <div style={{fontFamily:'var(--font-display)',fontSize:'20px',color:'var(--teal-dark)'}}>${totalFee}</div>
+              {confirmedProcedures.length > 0 && <div style={{marginTop:'12px',display:'flex',gap:'6px',flexWrap:'wrap'}}>{confirmedProcedures.map((item, index) => <button key={item.code + '-' + index} className="btn-sm btn-ghost" disabled={codingSaving} onClick={() => removeConfirmedProcedure(index)}>{item.code} · {item.description} ×</button>)}</div>}
+            </div>
+            {/* CDT table */}
+            <div style={{border:'1px solid var(--border)',borderRadius:'8px',overflow:'hidden',background:'var(--white)'}}>
+              {/* Header row */}
+              <div style={{display:'grid',gridTemplateColumns:'100px 1fr 100px 80px 120px',gap:'12px',padding:'12px 16px',fontWeight:700,color:'var(--ink3)',letterSpacing:'0.06em',textTransform:'uppercase',fontSize:'10px',borderBottom:'1px solid var(--border)'}}>
+                <div>Code</div>
+                <div>Description</div>
+                <div>Confidence</div>
+                <div style={{textAlign:'right'}}>Fee</div>
+                <div></div>
+              </div>
+
+              {/* Hint */}
+              <div style={{fontSize:'12px',color:'var(--ink3)',padding:'8px 16px',fontStyle:'italic',borderBottom:'1px solid var(--border)'}}>
+                AI suggestions are not billed automatically. Add a completed service to include it in the confirmed total.
+              </div>
+
+              {allFindingsList.length === 0 ? (
+                <div style={{padding:'18px 16px',fontSize:'12.5px',color:'var(--ink2)',lineHeight:1.55}}>
+                  No procedure suggestions were identified for this visit. Clinical findings are available in Chart Review and require clinician coding and confirmation before billing.
+                </div>
+              ) : (
+                allFindingsList.map((c, i) => (
+                  <div key={`${c.code || 'uncoded'}-${i}`} style={{
+                    display:'grid',
+                    gridTemplateColumns:'100px 1fr 100px 80px 120px',
+                    alignItems:'center',
+                    gap:'12px',
+                    padding:'12px 16px',
+                    borderBottom: i === allFindingsList.length - 1 ? 'none' : '1px solid var(--border)'
+                  }}>
+                    <div>
+                      {c.code ? (
+                        <span style={{fontWeight:700,color:'var(--navy)',fontFamily:'var(--font-mono)'}}>{c.code}</span>
+                      ) : (
+                        <span style={{fontSize:'10px',fontWeight:600,color:'var(--orange-c, #D97706)',background:'rgba(217,119,6,0.1)',padding:'2px 6px',borderRadius:'4px'}}>NEEDS CODE</span>
+                      )}
+                    </div>
+                    <div style={{fontSize:'12.5px',color:'var(--ink)'}}>
+                      {c.desc} {c.tooth ? <span style={{fontSize:'11px',color:'var(--ink3)'}}>({c.tooth})</span> : null}
+                    </div>
+                    <div style={{fontSize:'10px',color:'var(--ink3)',width:'100px',flexShrink:0}}>
+                      <div>{c.conf}%</div>
+                      <div style={{height:'4px',background:'var(--border)',borderRadius:'2px',marginTop:'4px',overflow:'hidden'}}>
+                        <div style={{height:'100%',background: c.code ? 'var(--teal)' : 'var(--orange-c, #D97706)',width:`${c.conf}%`}}/>
+                      </div>
+                    </div>
+                    <div style={{textAlign:'right',fontWeight:700,color: c.code ? 'var(--navy)' : 'var(--ink3)'}}>
+                      {c.code ? `$${c.fee}` : '$0'}
+                    </div>
+                    <div style={{textAlign:'right'}}>
+                      {c.code && <button className="btn-sm btn-ghost" disabled={codingSaving || confirmedProcedures.some(item => item.code === c.code && (item.tooth || '') === (c.tooth || ''))} onClick={() => addCommonProcedure({code:c.code,description:c.desc,fee:c.fee,tooth:c.tooth,status:'confirmed'})}>{confirmedProcedures.some(item => item.code === c.code && (item.tooth || '') === (c.tooth || '')) ? 'Added' : 'Add to bill'}</button>}
+                    </div>
+                  </div>
+                ))
+              )}
+
+              {/* Subtotal */}
+              <div style={{padding:'12px 16px',borderTop:'1px solid var(--border)',background:'var(--surface)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <div style={{fontSize:'12px',fontWeight:700,color:'var(--navy)'}}>Confirmed services total</div>
+                <div style={{fontFamily:'var(--font-display)',fontSize:'20px',color:'var(--teal-dark)',fontWeight:700}}>{`$${totalFee}`}</div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            {unmatchedFindingsList.length > 0 && (
+              <div style={{fontSize:'12px',color:'var(--ink3)',fontStyle:'italic',padding:'12px 0'}}>
+                💡 {unmatchedFindingsList.length} finding{unmatchedFindingsList.length === 1 ? '' : 's'} marked as <span style={{color:'var(--orange-c, #D97706)',fontWeight:600}}>NEEDS CODE</span> require dentist manual coding before adding to insurance claim subtotal.
+              </div>
+            )}
+
+            <div style={{display:'flex',flexDirection:'column',gap:'8px',marginTop:'20px'}}>
+              <button className="btn-primary" disabled={submitting || sessionStatus === 'submitted' || confirmedProcedures.length === 0} onClick={handleSubmitClaim}>
+                {sessionStatus === 'submitted' ? 'Visit Submitted' : submitting ? 'Submitting claim...' : 'Submit Visit & Return to Dashboard'}
+              </button>
+              <button className="btn-outline" disabled={submitting} onClick={() => handleAction('Visit details saved as draft.', 'Draft Saved')}>Save as Draft</button>
             </div>
           </div>
         </div>
-
-        <div>
-          {cdtList.length === 0 && (
-            <div style={{fontSize:'12px',color:'var(--ink3)',fontStyle:'italic',padding:'12px 0'}}>
-              No AI-suggested CDT codes for this visit yet — record a session to generate findings, or add codes manually below.
-            </div>
-          )}
-
-          <div style={{display:'flex',flexDirection:'column',gap:'8px',marginTop:'20px'}}>
-            <button className="btn-primary" disabled={submitting} onClick={handleSubmitClaim}>
-              {submitting ? 'Submitting claim...' : 'Submit Visit & Return to Dashboard'}
-            </button>
-            <button className="btn-outline" disabled={submitting} onClick={() => handleAction('Visit details saved as draft.', 'Draft Saved')}>Save as Draft</button>
-          </div>
-        </div>
-      </div>
+      )}
     </div>
+  );
+}
+
+export default function BillingPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: '24px', fontSize: '13px', color: 'var(--ink3)' }}>Loading billing overview…</div>}>
+      <BillingContent />
+    </Suspense>
   );
 }

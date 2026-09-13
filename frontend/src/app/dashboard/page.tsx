@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { patientsApi, type DashboardStats, type RecentSession } from '@/lib/apiClient';
+import { patientsApi, workflowApi, type DashboardStats, type RecentSession, type PracticeAnalytics } from '@/lib/apiClient';
 import { useAuth } from '@/store/AuthContext';
 
 function timeAgo(iso: string): string {
@@ -43,6 +43,8 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reviewTasks, setReviewTasks] = useState<any[]>([]);
+  const [analytics, setAnalytics] = useState<PracticeAnalytics | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -51,6 +53,8 @@ export default function DashboardPage() {
         setError(null);
         const data = await patientsApi.dashboardStats();
         setStats(data);
+        setReviewTasks(await workflowApi.reviewTasks());
+        setAnalytics(await workflowApi.analytics());
       } catch (err) {
         console.error('Failed to load dashboard stats:', err);
         setError(err instanceof Error ? err.message : 'Failed to load dashboard data.');
@@ -87,25 +91,64 @@ export default function DashboardPage() {
       )}
 
       <div className="stat-grid">
-        <div className="stat-card">
+        <div 
+          className="stat-card" 
+          onClick={() => router.push('/dashboard/patients')} 
+          style={{ cursor: 'pointer' }}
+          title="View today's visits"
+        >
           <div className="stat-val">{loading ? '—' : stats?.today_visits ?? 0}</div>
           <div className="stat-lbl">Today&apos;s Visits</div>
         </div>
-        <div className="stat-card">
+        <div 
+          className="stat-card" 
+          onClick={() => router.push('/dashboard/billing')} 
+          style={{ cursor: 'pointer' }}
+          title="Review visits pending billing"
+        >
           <div className="stat-val warn">{loading ? '—' : stats?.pending_review ?? 0}</div>
           <div className="stat-lbl">Pending Review</div>
-          <div className="stat-trend"><span className="text-muted">Needs attention</span></div>
+          <div className="stat-trend"><span className="text-muted">Needs attention →</span></div>
         </div>
-        <div className="stat-card">
+        <div 
+          className="stat-card" 
+          onClick={() => router.push('/dashboard/billing')} 
+          style={{ cursor: 'pointer' }}
+          title="View suggested revenue & billing"
+        >
           <div className="stat-val teal">${loading ? '—' : stats?.revenue_suggested ?? 0}</div>
           <div className="stat-lbl">Revenue Suggested</div>
+          <div className="stat-trend"><span className="text-muted">View details →</span></div>
         </div>
-        <div className="stat-card">
+        <div 
+          className="stat-card" 
+          onClick={() => router.push('/dashboard/patients')} 
+          style={{ cursor: 'pointer' }}
+          title="View active patients"
+        >
           <div className="stat-val">{loading ? '—' : stats?.active_patients ?? 0}</div>
           <div className="stat-lbl">Active Patients</div>
         </div>
       </div>
 
+
+      {!loading && analytics && (
+        <div className="card" style={{marginBottom:'20px'}}>
+          <div className="section-label mb-12">Practice analytics</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(130px, 1fr))',gap:'12px'}}>
+            <div><div className="stat-val">{analytics.completed_visits}</div><div className="stat-lbl">Completed visits</div></div>
+            <div><div className="stat-val">{analytics.submitted_visits}</div><div className="stat-lbl">Submitted visits</div></div>
+            <div><div className="stat-val teal">{analytics.confirmed_procedures}</div><div className="stat-lbl">Confirmed procedures</div></div>
+            <div><div className="stat-val">{analytics.note_approval_rate}%</div><div className="stat-lbl">Notes approved</div></div>
+          </div>
+        </div>
+      )}
+      {reviewTasks.length > 0 && (
+        <div className="card" style={{marginBottom:'20px'}}>
+          <div className="section-label mb-12">Review tasks</div>
+          {reviewTasks.slice(0, 6).map((task, index) => <button key={index} onClick={() => router.push('/dashboard/chart?patientId=' + task.patient_id + '&sessionId=' + task.session_id)} style={{display:'flex',width:'100%',justifyContent:'space-between',gap:'12px',padding:'10px 0',border:'none',borderBottom:'1px solid var(--border)',background:'transparent',cursor:'pointer',textAlign:'left'}}><span><strong>{task.patient_name}</strong> · {task.task}</span><span style={{color:'var(--teal-dark)'}}>Review →</span></button>)}
+        </div>
+      )}
       <div style={{display:'grid',gridTemplateColumns:'1fr',gap:'20px'}}>
         <div>
           <div className="section-label mb-12">Recent Activity</div>

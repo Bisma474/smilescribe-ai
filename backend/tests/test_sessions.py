@@ -94,6 +94,62 @@ def test_recording_endpoint_rejects_a_patient_the_dentist_does_not_own(client, r
     assert r.status_code == 404
 
 
+def test_session_history_lists_multiple_visits_most_recent_first(client, registered_user):
+    """A second recording used to overwrite the patient's only session row
+    in place, destroying the first visit's data. Each recording is now its
+    own row, and the history endpoint should list all of them."""
+    r = client.post("/api/v1/patients/", json={"first_name": "Multi", "last_name": "Visit"},
+                     headers=registered_user["headers"])
+    patient_id = r.json()["id"]
+
+    first = client.post(
+        f"/api/v1/transcription/session/{patient_id}/record",
+        files={"file": ("recording.wav", b"fake-audio-bytes-1", "audio/wav")},
+        headers=registered_user["headers"],
+    ).json()
+    second = client.post(
+        f"/api/v1/transcription/session/{patient_id}/record",
+        files={"file": ("recording.wav", b"fake-audio-bytes-2", "audio/wav")},
+        headers=registered_user["headers"],
+    ).json()
+    assert first["id"] != second["id"]
+
+    r = client.get(f"/api/v1/transcription/session/{patient_id}/history",
+                    headers=registered_user["headers"])
+    assert r.status_code == 200
+    ids = [s["id"] for s in r.json()]
+    assert first["id"] in ids
+    assert second["id"] in ids
+    assert ids.index(second["id"]) < ids.index(first["id"])  # most recent first
+
+
+def test_session_history_is_scoped_to_the_owning_practice(client, registered_user):
+    r = client.post("/api/v1/patients/", json={"first_name": "Owned", "last_name": "History"},
+                     headers=registered_user["headers"])
+    patient_id = r.json()["id"]
+    client.get(f"/api/v1/transcription/session/{patient_id}", headers=registered_user["headers"])
+
+    other_headers = _second_dentist_headers(client)
+    r = client.get(f"/api/v1/transcription/session/{patient_id}/history", headers=other_headers)
+    assert r.status_code == 404
+
+
+def test_get_session_by_id_is_scoped_to_the_owning_practice(client, registered_user):
+    r = client.post("/api/v1/patients/", json={"first_name": "Owned", "last_name": "ById"},
+                     headers=registered_user["headers"])
+    patient_id = r.json()["id"]
+    session = client.get(f"/api/v1/transcription/session/{patient_id}",
+                          headers=registered_user["headers"]).json()
+
+    other_headers = _second_dentist_headers(client)
+    r = client.get(f"/api/v1/transcription/session/by-id/{session['id']}", headers=other_headers)
+    assert r.status_code == 404
+
+    r = client.get(f"/api/v1/transcription/session/by-id/{session['id']}", headers=registered_user["headers"])
+    assert r.status_code == 200
+    assert r.json()["id"] == session["id"]
+
+
 def test_recording_endpoint_rejects_an_unsupported_file_extension(client, registered_user):
     r = client.post("/api/v1/patients/", json={"first_name": "Test", "last_name": "Patient"},
                      headers=registered_user["headers"])

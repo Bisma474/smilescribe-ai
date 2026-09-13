@@ -39,6 +39,13 @@ class PatientOut(PatientBase):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    # Most recent session's created_at for this patient, or None if they've
+    # never been recorded — not a real column, attached in the endpoint via
+    # a join so the frontend's "Today" filter can mean "seen today" rather
+    # than "profile created today" (a brand-new patient's profile is almost
+    # never created the same day they're actually filtered for, since it's
+    # usually created once and never touched again).
+    last_visit_at: datetime | None = None
 
     class Config:
         from_attributes = True

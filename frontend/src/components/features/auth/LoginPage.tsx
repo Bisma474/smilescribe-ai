@@ -7,14 +7,15 @@ type Tab = 'login' | 'register';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, register } = useAuth();
+  const { login, loginWithGoogle, register } = useAuth();
   const [tab, setTab] = useState<Tab>('login');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
 
   // Login state
-  const [email, setEmail] = useState('dr.kim@brightsmile.com');
-  const [password, setPassword] = useState('Demo@12345');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   // Register state
   const [regEmail, setRegEmail] = useState('');
@@ -33,6 +34,18 @@ export default function LoginPage() {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally { setLoading(false); }
+  };
+
+  const handleGoogleLogin = async () => {
+    setError(''); setGoogleLoading(true);
+    try {
+      // Navigates the browser away to Google — on success the page never
+      // returns to this handler; it comes back on /auth/callback instead.
+      await loginWithGoogle();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not start Google sign-in');
+      setGoogleLoading(false);
+    }
   };
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -150,28 +163,6 @@ export default function LoginPage() {
                 <div style={{fontFamily:'var(--font-display)',fontSize:'24px',color:'var(--navy)',marginBottom:'4px'}}>Welcome back</div>
                 <div style={{fontSize:'13px',color:'var(--ink3)',marginBottom:'16px'}}>Sign in to your practice account</div>
 
-                {/* Demo Credentials Info Banner */}
-                <div style={{
-                  background: 'rgba(74, 191, 176, 0.08)',
-                  border: '1px solid rgba(74, 191, 176, 0.25)',
-                  borderRadius: '12px',
-                  padding: '12px 16px',
-                  fontSize: '12px',
-                  lineHeight: '1.5',
-                  color: '#1b6b61',
-                  marginBottom: '20px',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '8px'
-                }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginTop:'2px',flexShrink:0}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                  <div>
-                    <div style={{ fontWeight: '700', marginBottom: '2px' }}>Demo Credentials (Pre-filled):</div>
-                    <div>Email: <strong style={{ userSelect: 'all' }}>dr.kim@brightsmile.com</strong></div>
-                    <div>Password: <strong style={{ userSelect: 'all' }}>Demo@12345</strong></div>
-                  </div>
-                </div>
-
                 <label className="form-label">Practice email</label>
                 <input
                   className="form-input"
@@ -207,27 +198,9 @@ export default function LoginPage() {
                 <button className="btn-primary" type="submit" disabled={loading} style={{opacity:loading?0.7:1}}>
                   {loading ? 'Signing in…' : 'Sign In to Practice'}
                 </button>
-                <button
-                  type="button"
-                  className="btn-outline"
-                  style={{marginTop:'10px'}}
-                  onClick={async () => {
-                    setLoading(true);
-                    setError('');
-                    try {
-                      await login('dr.kim@brightsmile.com', 'Demo@12345');
-                      router.push('/dashboard');
-                    } catch (err: unknown) {
-                      setError(err instanceof Error ? err.message : 'Demo login failed');
-                    } finally {
-                      setLoading(false);
-                    }
-                  }}
-                >
-                  Enter Demo App
-                </button>
                 <div className="divider-or">or</div>
-                <button type="button" className="btn-outline" onClick={() => setTab('register')}>Create a New Account</button>
+                <GoogleButton loading={googleLoading} onClick={handleGoogleLogin} />
+                <button type="button" className="btn-outline" style={{marginTop:'10px'}} onClick={() => setTab('register')}>Create a New Account</button>
               </form>
             )}
 
@@ -265,13 +238,38 @@ export default function LoginPage() {
                   {loading ? 'Creating account…' : 'Create Account'}
                 </button>
                 <div className="divider-or">or</div>
-                <button type="button" className="btn-outline" onClick={() => setTab('login')}>Already have an account</button>
+                <GoogleButton loading={googleLoading} onClick={handleGoogleLogin} label="Continue with Google" />
+                <button type="button" className="btn-outline" style={{marginTop:'10px'}} onClick={() => setTab('login')}>Already have an account</button>
               </form>
             )}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+/* ── "Continue with Google" button ── */
+function GoogleButton({ loading, onClick, label = 'Continue with Google' }: { loading: boolean; onClick: () => void; label?: string }) {
+  return (
+    <button
+      type="button"
+      className="btn-outline"
+      disabled={loading}
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
+        opacity: loading ? 0.7 : 1,
+      }}
+    >
+      <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true">
+        <path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v9h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.16z"/>
+        <path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.34l-7.11-5.52c-1.97 1.32-4.49 2.11-7.45 2.11-5.73 0-10.58-3.87-12.32-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/>
+        <path fill="#FBBC05" d="M11.68 28.18A13.93 13.93 0 0 1 10.75 24c0-1.45.25-2.86.93-4.18v-5.7H4.34A22.01 22.01 0 0 0 2 24c0 3.55.85 6.91 2.34 9.88l7.34-5.7z"/>
+        <path fill="#EA4335" d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.34 5.7c1.74-5.2 6.59-9.07 12.32-9.07z"/>
+      </svg>
+      {loading ? 'Redirecting to Google…' : label}
+    </button>
   );
 }
 

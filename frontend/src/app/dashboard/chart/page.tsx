@@ -1,7 +1,7 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { patientsApi, sessionsApi, logsApi } from '@/lib/apiClient';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { patientsApi, sessionsApi, logsApi, workflowApi, type Patient, type ClinicalSession, type AuditTimelineEvent } from '@/lib/apiClient';
 import { patientName as formatPatientName, patientMeta as formatPatientMeta } from '@/lib/patientDisplay';
 import { useAuth } from '@/store/AuthContext';
 
@@ -15,55 +15,21 @@ interface ToothInfo {
   label?: string;
 }
 
-const DEFAULT_PERIO_DATA: Record<number, ToothInfo> = {};
-
-// Helper to fill default normal values for all 32 teeth
 const generateDefaultPerioData = (): Record<number, ToothInfo> => {
-  const initialData: Record<number, ToothInfo> = {
-    3: {
-      buccal: [2, 3, 3],
-      lingual: [3, 3, 3],
-      bopBuccal: [false, false, false],
-      bopLingual: [false, true, false],
-      suppuration: false,
-      label: 'Calculus removal — supragingival scaling',
-      finding: 'Calculus deposits on the lingual. Supragingival scaling performed, all deposits removed.'
-    },
-    14: {
-      buccal: [3, 3, 4],
-      lingual: [3, 4, 3],
-      bopBuccal: [false, false, true],
-      bopLingual: [true, false, true],
-      suppuration: false,
-      label: 'Periodontal maintenance',
-      finding: 'Periodontal maintenance (D4910). Probing depths 3-4mm. Bleeding on probing (BOP) at mesial & distolingual surfaces.'
-    },
-    32: {
-      buccal: [5, 5, 5],
-      lingual: [5, 6, 5],
-      bopBuccal: [true, true, true],
-      bopLingual: [true, true, true],
-      suppuration: true,
-      label: 'Deep pocketing — active disease',
-      finding: 'Deep pocketing (5mm+) on multiple sites. BOP positive, suppuration noted. Active periodontal disease. CDT code D4341 recommended.'
-    }
-  };
-
+  const initialData: Record<number, ToothInfo> = {};
   for (let i = 1; i <= 32; i++) {
-    if (!initialData[i]) {
-      initialData[i] = {
-        buccal: [2, 2, 3],
-        lingual: [2, 2, 2],
-        bopBuccal: [false, false, false],
-        bopLingual: [false, false, false],
-        suppuration: false
-      };
-    }
+    initialData[i] = {
+      buccal: [2, 2, 2],
+      lingual: [2, 2, 2],
+      bopBuccal: [false, false, false],
+      bopLingual: [false, false, false],
+      suppuration: false
+    };
   }
   return initialData;
 };
 
-const TABS = ['Perio Chart', 'Clinical Entries', 'Summary'];
+const TABS = ['Perio Chart', 'Clinical Entries', 'Summary', 'AI Visit Note', 'Transcript'];
 
 interface ClinicalEntry {
   tooth: string;
@@ -84,37 +50,67 @@ interface SummaryReport {
   est_recovery?: number | null;
 }
 
-export default function ChartPage() {
+function ChartContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
-  
-  const [patientId, setPatientId] = useState<number>(2); // Default to Marcus Torres (2)
-  const [patientName, setPatientName] = useState<string>('Marcus Torres');
-  const [patientMeta, setPatientMeta] = useState<string>('DOB: 1981-03-14 · Perio maintenance');
+
+  const [patientId, setPatientId] = useState<number | null>(null);
+  const [patientName, setPatientName] = useState<string>('');
+  const [patientMeta, setPatientMeta] = useState<string>('');
   const [sessionId, setSessionId] = useState<number | null>(null);
-  
-  const [activeTab, setActiveTab] = useState<'perio' | 'entries' | 'summary'>('perio');
+  const [visits, setVisits] = useState<ClinicalSession[]>([]);
+
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [loadingPatients, setLoadingPatients] = useState(false);
+  const [patientsError, setPatientsError] = useState('');
+
+  const [activeTab, setActiveTab] = useState<'perio' | 'entries' | 'summary' | 'note' | 'transcript'>('perio');
   const [selectedTooth, setSelectedTooth] = useState<number>(14);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
 
-  // Perio data state
   const [perioData, setPerioData] = useState<Record<number, ToothInfo>>(() => generateDefaultPerioData());
 
-  // Real session data — transcript, AI-extracted clinical entries, summary
   const [transcript, setTranscript] = useState<string>('');
   const [clinicalEntries, setClinicalEntries] = useState<ClinicalEntry[]>([]);
   const [summaryReport, setSummaryReport] = useState<SummaryReport | null>(null);
+  const [aiNote, setAiNote] = useState<any>({ status: 'draft', sections: {} });
+  const [auditTimeline, setAuditTimeline] = useState<AuditTimelineEvent[]>([]);
+  const [patientSummary, setPatientSummary] = useState<any>({ status: 'draft', sections: {} });
+  const [patientSummarySaving, setPatientSummarySaving] = useState(false);
+  const [medicationsAllergies, setMedicationsAllergies] = useState<any>({ medications: [], allergies: [] });
+  const [riskFlags, setRiskFlags] = useState<any[]>([]);
+  const [visitComparison, setVisitComparison] = useState<any>(null);
+  const [followUpDraft, setFollowUpDraft] = useState<any>({ status: 'draft', message: '' });
+  const [careToolsSaving, setCareToolsSaving] = useState(false);
+  const [noteSaving, setNoteSaving] = useState(false);
   const [hoveredQuote, setHoveredQuote] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [diarizationStatus, setDiarizationStatus] = useState<ClinicalSession['diarization_status']>('not_run');
+  const [speakersSwapped, setSpeakersSwapped] = useState(false);
+  const [swapping, setSwapping] = useState(false);
+  const [voiceCommand, setVoiceCommand] = useState('');
+  const [voiceMessage, setVoiceMessage] = useState('');
 
   useEffect(() => {
-    // Read patientId from URL parameters safely in browser
-    const params = new URLSearchParams(window.location.search);
-    const pIdStr = params.get('patientId');
-    const pId = pIdStr ? parseInt(pIdStr) : 2;
+    const pIdStr = searchParams.get('patientId');
+    const pId = pIdStr ? parseInt(pIdStr, 10) : NaN;
+    const sessIdStr = searchParams.get('sessionId');
+    const sessIdFromUrl = sessIdStr ? parseInt(sessIdStr, 10) : NaN;
+
+    if (!pIdStr || Number.isNaN(pId)) {
+      let cancelled = false;
+      setLoadingPatients(true);
+      patientsApi.list()
+        .then(list => { if (!cancelled) setPatients(list); })
+        .catch(err => { if (!cancelled) setPatientsError(err instanceof Error ? err.message : 'Failed to load patients.'); })
+        .finally(() => { if (!cancelled) setLoadingPatients(false); });
+      return () => { cancelled = true; };
+    }
+
     setPatientId(pId);
 
     const loadData = async () => {
@@ -122,7 +118,6 @@ export default function ChartPage() {
         setLoading(true);
         setError(null);
 
-        // Log clinical access action (HIPAA)
         try {
           await logsApi.create({
             action: 'Access',
@@ -133,22 +128,22 @@ export default function ChartPage() {
           console.warn('Failed to write audit log:', lErr);
         }
 
-        // 1. Fetch patient details
         const pt = await patientsApi.get(pId);
         setPatientName(formatPatientName(pt));
         setPatientMeta(formatPatientMeta(pt));
 
-        // 2. Fetch session data
-        const session = await sessionsApi.getActive(pId);
+        const history = await sessionsApi.history(pId);
+        setVisits(history.filter(item => item.status !== 'new'));
+        const session = Number.isNaN(sessIdFromUrl)
+          ? await sessionsApi.getActive(pId)
+          : await sessionsApi.getById(sessIdFromUrl);
         setSessionId(session.id);
 
         if (session.perio_data) {
-          // Merge incoming data with default to guarantee 32 teeth exist
           const merged = generateDefaultPerioData();
           Object.assign(merged, session.perio_data);
           setPerioData(merged);
         } else {
-          // If no perio_data exists, save default back to the session
           const initial = generateDefaultPerioData();
           setPerioData(initial);
           await sessionsApi.update(session.id, { perio_data: initial });
@@ -157,13 +152,20 @@ export default function ChartPage() {
         setTranscript(session.transcript || '');
         setClinicalEntries((session.clinical_entries as ClinicalEntry[]) || []);
         setSummaryReport((session.summary_report as SummaryReport) || null);
+        setAiNote(session.ai_note || { status: 'draft', sections: { chief_complaint: '', findings: '', assessment: '', plan: '', instructions: '' } });
+        setAuditTimeline(await workflowApi.timeline(session.id));
+        setPatientSummary(session.patient_summary || { status: 'draft', sections: {} });
+        setMedicationsAllergies(session.medications_allergies || { medications: [], allergies: [] });
+        setFollowUpDraft(session.follow_up_draft || { status: 'draft', message: '' });
+        const [flags, comparison] = await Promise.all([workflowApi.riskFlags(session.id), workflowApi.comparison(session.id)]);
+        setRiskFlags(flags);
+        setVisitComparison(comparison);
+        setDiarizationStatus(session.diarization_status || 'not_run');
+        setSpeakersSwapped(!!session.speakers_swapped);
 
         if (session.status === 'error') {
           setError(session.error_message || 'The last recording failed to process.');
         } else if (session.status === 'processing') {
-          // A recording is still being transcribed/analyzed in the
-          // background — whatever transcript/entries/summary are shown
-          // below are from the previous visit, not this one yet.
           setIsProcessing(true);
         }
       } catch (err) {
@@ -175,15 +177,13 @@ export default function ChartPage() {
     };
 
     loadData();
-  }, [user]);
+  }, [searchParams, user]);
 
   const saveToBackend = async (data: Record<number, ToothInfo>, toothEdited: number) => {
     if (!sessionId) return;
     try {
       setSaveStatus('saving');
       await sessionsApi.update(sessionId, { perio_data: data });
-      
-      // Log update action
       try {
         await logsApi.create({
           action: 'Clinical',
@@ -193,7 +193,6 @@ export default function ChartPage() {
       } catch (lErr) {
         console.warn('Failed to write audit log:', lErr);
       }
-      
       setSaveStatus('saved');
     } catch (err) {
       console.error('Failed to auto-save:', err);
@@ -201,15 +200,41 @@ export default function ChartPage() {
     }
   };
 
-  // Helper functions for pocket depth styling
+  const handleSwapSpeakers = async () => {
+    if (!sessionId || swapping) return;
+    try {
+      setSwapping(true);
+      const updated = await sessionsApi.swapSpeakers(sessionId);
+      setTranscript(updated.transcript || '');
+      setSpeakersSwapped(!!updated.speakers_swapped);
+    } catch (err) {
+      console.error('Failed to swap speaker labels:', err);
+    } finally {
+      setSwapping(false);
+    }
+  };
+
+  const runVoiceCommand = (raw: string) => {
+    const command = raw.toLowerCase().trim();
+    setVoiceCommand(raw);
+    const tooth = command.match(/tooth\s+(\d{1,2})/);
+    if (tooth && Number(tooth[1]) >= 1 && Number(tooth[1]) <= 32) {
+      setSelectedTooth(Number(tooth[1])); setActiveTab('perio'); setVoiceMessage('Selected tooth ' + tooth[1]); return;
+    }
+    if (command.includes('transcript')) { setActiveTab('transcript'); setVoiceMessage('Opened transcript'); return; }
+    if (command.includes('note')) { setActiveTab('note'); setVoiceMessage('Opened AI visit note'); return; }
+    if (command.includes('billing')) { router.push('/dashboard/billing?patientId=' + patientId + (sessionId ? '&sessionId=' + sessionId : '')); return; }
+    setVoiceMessage('Try: open transcript, open note, open billing, or select tooth 14.');
+  };
+
   const getToothBgColor = (t: number) => {
     const tooth = perioData[t];
     if (!tooth) return 'var(--white)';
     const maxDepth = Math.max(...tooth.buccal, ...tooth.lingual);
     if (t === selectedTooth) return 'var(--teal-pale)';
-    if (maxDepth >= 5) return '#FEEEEE'; // Red tinted background
-    if (maxDepth === 4) return '#FFF9E6'; // Yellow tinted background
-    if (tooth.label?.includes('Calculus')) return '#EBF9F7'; // Teal tinted background
+    if (maxDepth >= 5) return '#FEEEEE';
+    if (maxDepth === 4) return '#FFF9E6';
+    if (tooth.label?.includes('Calculus')) return '#EBF9F7';
     return 'var(--white)';
   };
 
@@ -232,10 +257,7 @@ export default function ChartPage() {
       newArray[index] = Math.max(1, Math.min(10, newArray[index] + delta));
       const updated = {
         ...prev,
-        [selectedTooth]: {
-          ...tooth,
-          [type]: newArray
-        }
+        [selectedTooth]: { ...tooth, [type]: newArray }
       };
       saveToBackend(updated, selectedTooth);
       return updated;
@@ -250,10 +272,7 @@ export default function ChartPage() {
       newArray[index] = !newArray[index];
       const updated = {
         ...prev,
-        [selectedTooth]: {
-          ...tooth,
-          [type]: newArray
-        }
+        [selectedTooth]: { ...tooth, [type]: newArray }
       };
       saveToBackend(updated, selectedTooth);
       return updated;
@@ -262,6 +281,59 @@ export default function ChartPage() {
 
   const upperTeeth = Array.from({ length: 16 }, (_, i) => i + 1);
   const lowerTeeth = Array.from({ length: 16 }, (_, i) => 32 - i);
+
+  if (patientId === null) {
+    return (
+      <div>
+        <div className="page-header">
+          <div className="page-title">Chart Review</div>
+          <div className="page-sub">Choose a patient to review their chart.</div>
+        </div>
+        {patientsError && (
+          <div style={{ fontSize: '12.5px', color: 'var(--red-c, #A03030)', marginBottom: '16px' }}>
+            {patientsError}
+          </div>
+        )}
+        {loadingPatients ? (
+          <div style={{ fontSize: '12px', color: 'var(--ink3)' }}>Loading patients…</div>
+        ) : patients.length === 0 && !patientsError ? (
+          <div className="card" style={{ textAlign: 'center', padding: '32px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--ink3)', marginBottom: '16px' }}>
+              No patients yet — add one first.
+            </div>
+            <button className="btn-primary" onClick={() => router.push('/dashboard/patients')}>
+              Go to Patients
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: '1fr' }}>
+            {patients.map(p => (
+              <div
+                key={p.id}
+                className="patient-card"
+                onClick={() => {
+                  setPatientId(p.id);
+                  router.push(`/dashboard/chart?patientId=${p.id}`);
+                }}
+                style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '14px', padding: '14px 16px', background: 'var(--white)', border: '1px solid var(--border)', borderRadius: '10px' }}
+              >
+                <div className="patient-avatar" style={{ width: '38px', height: '38px', borderRadius: '50%', background: 'var(--teal-pale, #E8F7F5)', color: 'var(--teal-dark, #007A78)', fontWeight: 700, fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  {formatPatientName(p).split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="patient-name" style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--navy)' }}>{formatPatientName(p)}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--ink3)', marginTop: '2px' }}>{formatPatientMeta(p)}</div>
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--teal-dark)', fontWeight: 600 }}>
+                  Open Chart &rarr;
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -281,8 +353,13 @@ export default function ChartPage() {
             )}
           </div>
           <div className="page-sub">
-            {patientName} · {patientMeta} · 17m 04s recorded · Evidence-grounded clinical NLP
+            {patientName} · {patientMeta} · Evidence-grounded clinical NLP
           </div>
+          {visits.length > 0 && (
+            <select aria-label="Select visit" value={sessionId ?? ''} onChange={e => router.push('/dashboard/chart?patientId=' + patientId + '&sessionId=' + e.target.value)} className="form-select" style={{marginTop:'8px',maxWidth:'280px'}}>
+              {visits.map(visit => <option key={visit.id} value={visit.id}>{new Date(visit.created_at).toLocaleString()} · {visit.status}</option>)}
+            </select>
+          )}
         </div>
         <div style={{display:'flex',gap:'8px',flexWrap:'wrap',alignItems:'center'}}>
           <div className="xai-hint-pill">
@@ -290,10 +367,16 @@ export default function ChartPage() {
             Interactive Chart: Click teeth to inspect and edit depths
           </div>
           <button className="btn-sm btn-ghost" onClick={() => setActiveTab('perio')}>✎ Perio Edit</button>
-          <button className="btn-sm btn-teal" onClick={() => router.push(`/dashboard/billing?patientId=${patientId}`)}>Proceed to Billing →</button>
+          <button className="btn-sm btn-teal" onClick={() => router.push(`/dashboard/billing?patientId=${patientId}${sessionId ? `&sessionId=${sessionId}` : ''}`)}>Proceed to Billing →</button>
         </div>
       </div>
 
+      <div className="card" style={{padding:'12px 14px',marginBottom:'16px',display:'flex',gap:'8px',alignItems:'center',flexWrap:'wrap'}}>
+        <strong style={{fontSize:'12px',color:'var(--navy)'}}>Voice command</strong>
+        <input className="form-input" aria-label="Voice command" value={voiceCommand} onChange={e => setVoiceCommand(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runVoiceCommand(voiceCommand); }} placeholder="e.g. open transcript or select tooth 14" style={{maxWidth:'320px'}} />
+        <button className="btn-sm btn-ghost" onClick={() => runVoiceCommand(voiceCommand)}>Run</button>
+        {voiceMessage && <span style={{fontSize:'11px',color:'var(--teal-dark)'}}>{voiceMessage}</span>}
+      </div>
       {isProcessing && (
         <div style={{
           background: '#FFF9E6',
@@ -319,56 +402,55 @@ export default function ChartPage() {
           marginBottom: '16px',
           fontSize: '12.5px'
         }}>
-          💡 {error}
+          {error}
         </div>
       )}
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr',gap:'16px'}}>
-        {/* Main tabs */}
-        <div className="card" style={{padding:0,overflow:'hidden'}}>
-          <div style={{display:'flex',borderBottom:'1px solid var(--border)',background:'var(--surface)'}}>
-            {[
-              { id: 'perio', label: 'Perio Chart' },
-              { id: 'entries', label: 'Clinical Entries' },
-              { id: 'summary', label: 'Summary Report' }
-            ].map(t => (
-              <button
-                key={t.id}
-                onClick={() => setActiveTab(t.id as any)}
-                style={{
-                  padding:'12px 20px',
-                  fontSize:'13px',
-                  fontWeight:600,
-                  color:activeTab === t.id ? 'var(--teal-dark)' : 'var(--ink3)',
-                  cursor:'pointer',
-                  border:'none',
-                  background:'transparent',
-                  borderBottom: activeTab === t.id ? '2.5px solid var(--teal)' : '2.5px solid transparent',
-                  marginBottom:'-1.5px',
-                  transition:'all 0.15s ease'
-                }}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+      {/* Tabs */}
+      <div style={{display:'flex',gap:'4px',borderBottom:'1px solid var(--border)',marginBottom:'16px'}}>
+        {TABS.map((t, idx) => {
+          const tabKey = idx === 0 ? 'perio' : idx === 1 ? 'entries' : idx === 2 ? 'summary' : idx === 3 ? 'note' : 'transcript';
+          const active = activeTab === tabKey;
+          return (
+            <button
+              key={t}
+              onClick={() => setActiveTab(tabKey as any)}
+              style={{
+                padding:'8px 16px',
+                fontSize:'13px',
+                fontWeight: active ? 700 : 500,
+                color: active ? 'var(--teal-dark)' : 'var(--ink3)',
+                borderBottom: active ? '2px solid var(--teal)' : '2px solid transparent',
+                background:'none',
+                borderTop:'none',
+                borderLeft:'none',
+                borderRight:'none',
+                cursor:'pointer'
+              }}
+            >
+              {t}
+            </button>
+          );
+        })}
+      </div>
 
+      {/* Main Grid: Left Tab Content vs Right Transcript */}
+      <div style={{display:'grid',gridTemplateColumns:activeTab === 'transcript' ? '1fr' : '1fr 400px',gap:'20px',alignItems:'start'}}>
+        <div>
           {/* TAB 1: PERIO CHART */}
           {activeTab === 'perio' && (
-            <div style={{padding:'20px'}}>
-              <div style={{fontSize:'12px',color:'var(--ink2)',marginBottom:'20px',lineHeight:'1.5'}}>
-                Visual pocket depth charting. Clicking on a tooth displays its details. Values of 4 mm or more are highlighted in <span style={{color:'var(--orange-c)',fontWeight:'bold'}}>orange</span> and 5 mm or more in <span style={{color:'var(--red-c)',fontWeight:'bold'}}>red</span>.
-              </div>
-
-              {/* Tooth Chart Row: Upper */}
-              <div style={{marginBottom:'24px'}}>
+            <div style={{padding:'16px'}}>
+              {/* Tooth Arches Display */}
+              <div style={{marginBottom:'20px'}}>
+                {/* Upper Arch */}
                 <div style={{fontSize:'11px',fontWeight:'bold',color:'var(--navy)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:'8px'}}>Maxillary Arch (Upper Teeth 1-16)</div>
                 <div style={{
                   display:'grid',
                   gridTemplateColumns:'repeat(16, minmax(0, 1fr))',
                   gap:'4px',
                   overflowX:'auto',
-                  paddingBottom:'8px'
+                  paddingBottom:'8px',
+                  marginBottom:'16px'
                 }}>
                   {upperTeeth.map(t => {
                     const tooth = perioData[t] || { buccal: [2,2,3], lingual: [2,2,2] };
@@ -412,10 +494,8 @@ export default function ChartPage() {
                     );
                   })}
                 </div>
-              </div>
 
-              {/* Tooth Chart Row: Lower */}
-              <div style={{marginBottom:'24px'}}>
+                {/* Lower Arch */}
                 <div style={{fontSize:'11px',fontWeight:'bold',color:'var(--navy)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:'8px'}}>Mandibular Arch (Lower Teeth 17-32)</div>
                 <div style={{
                   display:'grid',
@@ -486,7 +566,7 @@ export default function ChartPage() {
                     <div>
                       <div style={{fontSize:'14px',fontWeight:'700',color:'var(--navy)'}}>Tooth #{selectedTooth} Details</div>
                       <div style={{fontSize:'11px',color:'var(--ink3)'}}>
-                        {selectedTooth <= 16 ? 'Maxillary Upper Arch' : 'Mandibular Lower Arch'} · {selectedTooth === 32 || selectedTooth === 14 || selectedTooth === 3 ? 'AI Findings Extracted' : 'Normal parameters'}
+                        {selectedTooth <= 16 ? 'Maxillary Upper Arch' : 'Mandibular Lower Arch'} · {perioData[selectedTooth]?.finding ? 'Findings on record' : 'Normal parameters'}
                       </div>
                     </div>
                   </div>
@@ -568,7 +648,6 @@ export default function ChartPage() {
                             style={{border:'none',background:'none',cursor:'pointer',fontWeight:'bold',color:'var(--ink3)',padding:'0 4px'}}
                           >+</button>
                         </div>
-                        {/* BOP Trigger */}
                         <button
                           onClick={() => toggleBop('bopBuccal', idx)}
                           style={{
@@ -621,7 +700,6 @@ export default function ChartPage() {
                             style={{border:'none',background:'none',cursor:'pointer',fontWeight:'bold',color:'var(--ink3)',padding:'0 4px'}}
                           >+</button>
                         </div>
-                        {/* BOP Trigger */}
                         <button
                           onClick={() => toggleBop('bopLingual', idx)}
                           style={{
@@ -701,6 +779,25 @@ export default function ChartPage() {
             </div>
           )}
 
+          {activeTab === 'note' && (
+            <div style={{padding:'20px'}}>
+              <div className="card" style={{padding:'18px'}}>
+                <div style={{fontSize:'15px',fontWeight:700,color:'var(--navy)',marginBottom:'6px'}}>AI Visit Note</div>
+                <div style={{fontSize:'12px',color:'var(--ink3)',marginBottom:'14px'}}>Editable draft for this selected visit. Review before approval.</div>
+                {['chief_complaint','findings','assessment','plan','instructions'].map(section => (
+                  <label key={section} style={{display:'block',fontSize:'11px',fontWeight:700,textTransform:'capitalize',color:'var(--ink3)',marginTop:'10px'}}>
+                    {section.replace('_',' ')}
+                    <textarea className="form-input" value={aiNote.sections?.[section] || ''} onChange={e => setAiNote({...aiNote, status:'draft', sections:{...aiNote.sections,[section]:e.target.value}})} style={{width:'100%',minHeight:'70px',marginTop:'4px'}} />
+                  </label>
+                ))}
+                <div style={{display:'flex',gap:'8px',marginTop:'14px'}}>
+                  <button className="btn-sm btn-ghost" disabled={noteSaving} onClick={async () => { if (!sessionId) return; setNoteSaving(true); try { const updated = await sessionsApi.generateAiNote(sessionId); setAiNote(updated.ai_note || aiNote); } finally { setNoteSaving(false); } }}>{noteSaving ? 'Generating...' : 'Generate AI Note'}</button>
+                  <button className="btn-sm btn-ghost" disabled={noteSaving} onClick={async () => { if (!sessionId) return; setNoteSaving(true); try { await sessionsApi.update(sessionId, { ai_note: {...aiNote, status:'draft'} }); } finally { setNoteSaving(false); } }}>Save Draft</button>
+                  <button className="btn-sm btn-teal" disabled={noteSaving} onClick={async () => { if (!sessionId) return; setNoteSaving(true); try { const note={...aiNote,status: aiNote.status === 'approved' ? 'draft' : 'approved'}; await sessionsApi.update(sessionId,{ai_note:note}); setAiNote(note); } finally { setNoteSaving(false); } }}>{aiNote.status === 'approved' ? 'Reopen Draft' : 'Approve Note'}</button>
+                </div>
+              </div>
+            </div>
+          )}
           {/* TAB 3: SUMMARY REPORT */}
           {activeTab === 'summary' && (
             <div style={{padding:'20px'}}>
@@ -756,9 +853,55 @@ export default function ChartPage() {
                 )}
               </div>
 
+
+              <div className="card" style={{padding:'18px',marginBottom:'16px'}}>
+                <div style={{fontSize:'15px',fontWeight:700,color:'var(--navy)',marginBottom:'10px'}}>Care tools</div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))',gap:'14px'}}>
+                  <div><div style={{fontSize:'11px',fontWeight:700,color:'var(--ink3)',textTransform:'uppercase'}}>Medications & allergies</div><div style={{fontSize:'12px',marginTop:'5px'}}><strong>Medications:</strong> {(medicationsAllergies.medications || []).join(', ') || 'None identified'}</div><div style={{fontSize:'12px',marginTop:'4px'}}><strong>Allergies:</strong> {(medicationsAllergies.allergies || []).join(', ') || 'None identified'}</div></div>
+                  <div><div style={{fontSize:'11px',fontWeight:700,color:'var(--ink3)',textTransform:'uppercase'}}>Risk flags</div>{riskFlags.length ? riskFlags.map((flag, index) => <div key={index} style={{fontSize:'12px',marginTop:'5px',color:'var(--red-dark, #A03030)'}}>{flag.label} · {flag.reason}</div>) : <div style={{fontSize:'12px',marginTop:'5px'}}>No review flags identified.</div>}</div>
+                  <div><div style={{fontSize:'11px',fontWeight:700,color:'var(--ink3)',textTransform:'uppercase'}}>Visit comparison</div><div style={{fontSize:'12px',marginTop:'5px'}}>{visitComparison?.previous_session_id ? `${visitComparison.new_findings?.length || 0} new and ${visitComparison.resolved_findings?.length || 0} resolved findings since the prior visit.` : 'No prior completed visit available.'}</div></div>
+                </div>
+                <div style={{marginTop:'14px',borderTop:'1px solid var(--border)',paddingTop:'12px'}}>
+                  <div style={{fontSize:'11px',fontWeight:700,color:'var(--ink3)',textTransform:'uppercase',marginBottom:'5px'}}>Appointment follow-up draft</div>
+                  <textarea className="form-input" value={followUpDraft.message || ''} onChange={e => setFollowUpDraft({...followUpDraft, status:'draft', message:e.target.value})} style={{width:'100%',minHeight:'58px'}} />
+                  <div style={{display:'flex',gap:'8px',marginTop:'8px'}}><button className="btn-sm btn-ghost" disabled={careToolsSaving || !sessionId} onClick={async () => { if (!sessionId) return; setCareToolsSaving(true); try { const updated = await workflowApi.generateFollowUp(sessionId); setFollowUpDraft(updated.follow_up_draft || followUpDraft); } finally { setCareToolsSaving(false); } }}>{careToolsSaving ? 'Generating...' : 'Generate follow-up'}</button><button className="btn-sm btn-ghost" disabled={careToolsSaving || !sessionId} onClick={async () => { if (!sessionId) return; setCareToolsSaving(true); try { await sessionsApi.update(sessionId, { follow_up_draft: {...followUpDraft, status:'draft'} }); } finally { setCareToolsSaving(false); } }}>Save draft</button></div>
+                </div>
+              </div>
+              <div className="card" style={{padding:'18px',marginBottom:'16px'}}>
+                <div style={{fontSize:'15px',fontWeight:700,color:'var(--navy)',marginBottom:'6px'}}>Patient-friendly after-visit summary</div>
+                <div style={{fontSize:'12px',color:'var(--ink3)',marginBottom:'12px'}}>Plain-language draft. Review and approve it before sharing with the patient.</div>
+                {['visit_summary','care_instructions','when_to_contact'].map(section => (
+                  <label key={section} style={{display:'block',fontSize:'11px',fontWeight:700,textTransform:'capitalize',color:'var(--ink3)',marginTop:'9px'}}>
+                    {section.replaceAll('_', ' ')}
+                    <textarea className="form-input" value={patientSummary.sections?.[section] || ''} onChange={e => setPatientSummary({...patientSummary, status:'draft', sections:{...patientSummary.sections,[section]:e.target.value}})} style={{width:'100%',minHeight:'56px',marginTop:'4px'}} />
+                  </label>
+                ))}
+                <div style={{fontSize:'11px',fontWeight:700,textTransform:'uppercase',color:'var(--ink3)',marginTop:'10px'}}>Next steps</div>
+                <textarea className="form-input" value={(patientSummary.sections?.next_steps || []).join('\n')} onChange={e => setPatientSummary({...patientSummary, status:'draft', sections:{...patientSummary.sections,next_steps:e.target.value.split('\n').filter(Boolean)}})} style={{width:'100%',minHeight:'54px',marginTop:'4px'}} />
+                <div style={{display:'flex',gap:'8px',marginTop:'12px'}}>
+                  <button className="btn-sm btn-ghost" disabled={patientSummarySaving || !sessionId} onClick={async () => { if (!sessionId) return; setPatientSummarySaving(true); try { const updated = await workflowApi.generatePatientSummary(sessionId); setPatientSummary(updated.patient_summary || patientSummary); setAuditTimeline(await workflowApi.timeline(sessionId)); } finally { setPatientSummarySaving(false); } }}>{patientSummarySaving ? 'Generating...' : 'Generate draft'}</button>
+                  <button className="btn-sm btn-ghost" disabled={patientSummarySaving || !sessionId} onClick={async () => { if (!sessionId) return; setPatientSummarySaving(true); try { await sessionsApi.update(sessionId, { patient_summary: {...patientSummary, status:'draft'} }); } finally { setPatientSummarySaving(false); } }}>Save draft</button>
+                  <button className="btn-sm btn-teal" disabled={patientSummarySaving || !sessionId} onClick={async () => { if (!sessionId) return; setPatientSummarySaving(true); try { const summary={...patientSummary,status: patientSummary.status === 'approved' ? 'draft' : 'approved'}; await sessionsApi.update(sessionId,{patient_summary:summary}); setPatientSummary(summary); } finally { setPatientSummarySaving(false); } }}>{patientSummary.status === 'approved' ? 'Reopen draft' : 'Approve summary'}</button>
+                </div>
+              </div>
+              <div className="card" style={{padding:'18px'}}>
+                <div style={{fontSize:'15px',fontWeight:700,color:'var(--navy)',marginBottom:'10px'}}>Visit activity</div>
+                {auditTimeline.length === 0 ? (
+                  <div style={{fontSize:'12px',color:'var(--ink3)'}}>No recorded review activity for this visit yet.</div>
+                ) : (
+                  <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
+                    {auditTimeline.slice().reverse().map((item, index) => (
+                      <div key={item.occurred_at + index} style={{borderLeft:'2px solid var(--teal)',paddingLeft:'10px'}}>
+                        <div style={{fontSize:'12px',fontWeight:700,color:'var(--navy)'}}>{item.detail}</div>
+                        <div style={{fontSize:'10px',color:'var(--ink3)',marginTop:'2px'}}>{new Date(item.occurred_at).toLocaleString()}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               {summaryReport && (
                 <div style={{display:'flex',justifyContent:'flex-end',alignItems:'center',background:'var(--navy)',borderRadius:'12px',padding:'14px 20px',color:'white'}}>
-                  <button className="btn-sm btn-teal" onClick={() => router.push(`/dashboard/billing?patientId=${patientId}`)}>Go to Billing Details</button>
+                  <button className="btn-sm btn-teal" onClick={() => router.push(`/dashboard/billing?patientId=${patientId}${sessionId ? `&sessionId=${sessionId}` : ''}`)}>Go to Billing Details →</button>
                 </div>
               )}
             </div>
@@ -770,23 +913,58 @@ export default function ChartPage() {
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',borderBottom:'1px solid var(--border)',background:'var(--white)'}}>
             <div style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'12px',fontWeight:700,color:'var(--navy)'}}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-              Transcript · Evidence View
+              Transcript
             </div>
-            <div style={{fontSize:'10px',fontWeight:700,color:'var(--teal-dark)',background:'var(--teal-pale)',borderRadius:'20px',padding:'3px 10px'}}>↔ Bidirectional</div>
+            <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+              {(diarizationStatus === 'success' || diarizationStatus === 'ai_assigned') && (
+                <button
+                  onClick={handleSwapSpeakers}
+                  disabled={swapping}
+                  title="Flip the Dentist/Patient labels if speaker detection guessed wrong"
+                  style={{fontSize:'10px',fontWeight:700,color:'var(--navy)',background:'var(--white)',border:'1px solid var(--border)',borderRadius:'20px',padding:'3px 10px',cursor:swapping?'default':'pointer',opacity:swapping?0.6:1}}
+                >
+                  ⇄ {swapping ? 'Swapping…' : 'Swap speakers'}
+                </button>
+              )}
+              <div style={{fontSize:'10px',fontWeight:700,color:'var(--teal-dark)',background:'var(--teal-pale)',borderRadius:'20px',padding:'3px 10px'}}>↔ Bidirectional</div>
+            </div>
           </div>
           <div style={{padding:'7px 12px',fontSize:'10px',color:'var(--ink3)',background:'var(--teal-xpale)',borderBottom:'1px solid var(--border)',lineHeight:1.4}}>
-            Hover a clinical entry to highlight supporting sentences below · Hover supporting sentences to highlight clinical entries
+            Speaker-labelled transcript for this selected visit.
           </div>
-          <div style={{flex:1,overflowY:'auto',padding:'8px 0',maxHeight:'400px'}}>
-            {!transcript ? (
-              <div style={{padding:'24px 16px',textAlign:'center',fontSize:'12px',color:'var(--ink3)'}}>
-                No transcript yet — record a visit to generate one.
-              </div>
-            ) : (
-              <div style={{padding:'8px 16px',fontSize:'12.5px',color:'var(--ink)',lineHeight:1.7}}>
-                {renderTranscriptWithHighlight(transcript, hoveredQuote)}
-              </div>
-            )}
+          {diarizationStatus && diarizationStatus !== 'not_run' && (
+            <div style={{
+              padding:'6px 12px',fontSize:'10px',lineHeight:1.4,borderBottom:'1px solid var(--border)',
+              color: diarizationStatus === 'success' ? 'var(--teal-dark)' : diarizationStatus === 'failed' ? 'var(--red-c)' : 'var(--ink3)',
+              background: diarizationStatus === 'success' ? 'var(--teal-xpale)' : 'var(--white)',
+            }}>
+              {diarizationStatus === 'success' && (
+                <>Speaker labels auto-detected — verify Dentist/Patient are correct{speakersSwapped ? ' (swapped by you)' : ''}, and use "Swap speakers" to fix if reversed.</>
+              )}
+              {diarizationStatus === 'ai_assigned' && (
+                <>Speaker labels were inferred from the transcript text. Review them before relying on speaker identity.</>
+              )}
+              {diarizationStatus === 'unavailable' && (
+                <>Speaker labels unavailable for this recording (single speaker detected, or diarization isn't configured) — showing the plain transcript.</>
+              )}
+              {diarizationStatus === 'failed' && (
+                <>Speaker detection failed for this recording — showing the plain transcript without speaker labels.</>
+              )}
+            </div>
+          )}
+          <div style={{flex:1,overflowY:'auto',padding:'8px 0',maxHeight:activeTab === 'transcript' ? 'calc(100vh - 290px)' : '400px'}}>
+            <div style={{padding:'8px 16px',fontSize:'12.5px',color:'var(--ink)',lineHeight:1.7}}>
+              {splitTranscriptTurns(transcript).map((turn, index, turns) => (
+                <div key={turn.speaker + '-' + index} style={{padding:'8px 0',borderBottom:index === turns.length - 1 ? 'none' : '1px solid rgba(27,58,107,0.08)',cursor:'default'}}>
+                  {turn.speaker && (
+                    <span style={{display:'inline-block',minWidth:'62px',marginRight:'8px',fontSize:'10px',fontWeight:800,letterSpacing:'0.06em',color:turn.speaker === 'Dentist' ? 'var(--teal-dark)' : 'var(--navy-mid)'}}>
+                      {turn.speaker.toUpperCase()}
+                    </span>
+                  )}
+                  <span>{turn.text}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -794,9 +972,35 @@ export default function ChartPage() {
   );
 }
 
-// Splits the transcript around the currently-hovered clinical entry's
-// verbatim quote (if it appears) and wraps that span so hovering a
-// clinical entry visually points back to the exact evidence sentence.
+export default function ChartPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: '20px', color: 'var(--ink3)', fontSize: '13px' }}>Loading chart review...</div>}>
+      <ChartContent />
+    </Suspense>
+  );
+}
+
+type TranscriptTurn = { speaker: 'Dentist' | 'Patient' | null; text: string };
+
+function splitTranscriptTurns(transcript: string): TranscriptTurn[] {
+  const label = /(?:^|\n|\s)(Dentist|Patient):\s*/gi;
+  const matches = Array.from(transcript.matchAll(label));
+  if (matches.length === 0) return [{ speaker: null, text: transcript.trim() }].filter(turn => turn.text);
+
+  const turns: TranscriptTurn[] = [];
+  const prefix = transcript.slice(0, matches[0].index).trim();
+  if (prefix) turns.push({ speaker: null, text: prefix });
+
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index];
+    const start = (match.index || 0) + match[0].length;
+    const end = index + 1 < matches.length ? (matches[index + 1].index || transcript.length) : transcript.length;
+    const text = transcript.slice(start, end).trim();
+    if (text) turns.push({ speaker: match[1].toLowerCase() === 'dentist' ? 'Dentist' : 'Patient', text });
+  }
+  return turns;
+}
+
 function renderTranscriptWithHighlight(transcript: string, hoveredQuote: string | null) {
   if (!hoveredQuote) return transcript;
   const idx = transcript.indexOf(hoveredQuote);
