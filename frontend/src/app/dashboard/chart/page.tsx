@@ -59,6 +59,7 @@ function ChartContent() {
   const [patientName, setPatientName] = useState<string>('');
   const [patientMeta, setPatientMeta] = useState<string>('');
   const [sessionId, setSessionId] = useState<number | null>(null);
+  const [visits, setVisits] = useState<ClinicalSession[]>([]);
 
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loadingPatients, setLoadingPatients] = useState(false);
@@ -119,6 +120,8 @@ function ChartContent() {
         setPatientName(formatPatientName(pt));
         setPatientMeta(formatPatientMeta(pt));
 
+        const history = await sessionsApi.history(pId);
+        setVisits(history.filter(item => item.status !== 'new'));
         const session = Number.isNaN(sessIdFromUrl)
           ? await sessionsApi.getActive(pId)
           : await sessionsApi.getById(sessIdFromUrl);
@@ -319,6 +322,11 @@ function ChartContent() {
           <div className="page-sub">
             {patientName} · {patientMeta} · Evidence-grounded clinical NLP
           </div>
+          {visits.length > 0 && (
+            <select aria-label="Select visit" value={sessionId ?? ''} onChange={e => router.push('/dashboard/chart?patientId=' + patientId + '&sessionId=' + e.target.value)} className="form-select" style={{marginTop:'8px',maxWidth:'280px'}}>
+              {visits.map(visit => <option key={visit.id} value={visit.id}>{new Date(visit.created_at).toLocaleString()} · {visit.status}</option>)}
+            </select>
+          )}
         </div>
         <div style={{display:'flex',gap:'8px',flexWrap:'wrap',alignItems:'center'}}>
           <div className="xai-hint-pill">
