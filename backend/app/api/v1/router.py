@@ -36,3 +36,5 @@ _try_include("patients", prefix="/patients", tags=["Patients"])
 _try_include("transcription", prefix="/transcription", tags=["Transcription"])
 _try_include("notes", prefix="/notes", tags=["Notes"])
 _try_include("audit_logs", prefix="/audit-logs", tags=["AuditLogs"])
+
+_try_include("workflow", prefix="/workflow", tags=["Workflow"])

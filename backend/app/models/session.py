@@ -26,6 +26,10 @@ class ClinicalSession(Base):
     perio_data = Column(JSON, nullable=True)
     clinical_entries = Column(JSON, nullable=True)
     summary_report = Column(JSON, nullable=True)
+    treatment_opportunities = Column(JSON, nullable=True)
+    candidate_procedures = Column(JSON, nullable=True)
+    clinician_confirmed_procedures = Column(JSON, nullable=True)
+    ai_note = Column(JSON, nullable=True)
     error_message = Column(Text, nullable=True)
     # Set to a fresh random value on every new recording job. The background
     # job only writes its results if this still matches — protects against

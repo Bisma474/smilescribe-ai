@@ -271,6 +271,10 @@ def create_session(
         perio_data=body.perio_data,
         clinical_entries=body.clinical_entries,
         summary_report=body.summary_report,
+        treatment_opportunities=body.treatment_opportunities,
+        candidate_procedures=body.candidate_procedures,
+        clinician_confirmed_procedures=body.clinician_confirmed_procedures,
+        ai_note=body.ai_note,
     )
     db.add(session)
     db.commit()

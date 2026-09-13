@@ -39,6 +39,14 @@ def update_session(
         session.clinical_entries = body.clinical_entries
     if body.summary_report is not None:
         session.summary_report = body.summary_report
+    if body.treatment_opportunities is not None:
+        session.treatment_opportunities = body.treatment_opportunities
+    if body.candidate_procedures is not None:
+        session.candidate_procedures = body.candidate_procedures
+    if body.clinician_confirmed_procedures is not None:
+        session.clinician_confirmed_procedures = body.clinician_confirmed_procedures
+    if body.ai_note is not None:
+        session.ai_note = body.ai_note
 
     db.commit()
     db.refresh(session)

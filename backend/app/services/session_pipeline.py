@@ -15,7 +15,7 @@ from app.db.session import SessionLocal
 from app.models.session import ClinicalSession
 from app.services.asr_service import transcribe_audio
 from app.services.chart_extraction_service import extract_chart
-from app.services.chart_mapping import build_summary_report, map_findings_to_clinical_entries
+from app.services.chart_mapping import build_summary_report, build_workflow_items, map_findings_to_clinical_entries
 from app.services.diarization_service import DiarizationUnavailable, diarize_audio, merge_with_transcript
 from app.services.speaker_label_service import label_transcript_roles
 
@@ -160,13 +160,17 @@ def process_recording(session_id: int, job_token: str, audio_bytes: bytes, filen
             # only a display aid and must never alter clinical evidence.
             findings = extract_chart(plain_transcript)
             clinical_entries = map_findings_to_clinical_entries(findings)
-            summary_report = build_summary_report(clinical_entries)
+            treatment_opportunities, candidate_procedures = build_workflow_items(clinical_entries)
+            summary_report = build_summary_report(clinical_entries, candidate_procedures)
 
             session = _load_current_job()
             if session is None:
                 return
             session.clinical_entries = clinical_entries
             session.summary_report = summary_report
+            session.treatment_opportunities = treatment_opportunities
+            session.candidate_procedures = candidate_procedures
+            session.clinician_confirmed_procedures = []
             session.status = "complete"
             session.error_message = None
             db.commit()
