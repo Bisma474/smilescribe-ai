@@ -155,6 +155,7 @@ export interface ClinicalSession {
   clinical_entries?: any[];
   summary_report?: any;
   error_message?: string | null;
+  ai_note?: any;
   created_at: string;
 }
 

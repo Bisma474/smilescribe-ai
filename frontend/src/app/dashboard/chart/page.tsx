@@ -29,7 +29,7 @@ const generateDefaultPerioData = (): Record<number, ToothInfo> => {
   return initialData;
 };
 
-const TABS = ['Perio Chart', 'Clinical Entries', 'Summary'];
+const TABS = ['Perio Chart', 'Clinical Entries', 'Summary', 'AI Visit Note'];
 
 interface ClinicalEntry {
   tooth: string;
@@ -65,7 +65,7 @@ function ChartContent() {
   const [loadingPatients, setLoadingPatients] = useState(false);
   const [patientsError, setPatientsError] = useState('');
 
-  const [activeTab, setActiveTab] = useState<'perio' | 'entries' | 'summary'>('perio');
+  const [activeTab, setActiveTab] = useState<'perio' | 'entries' | 'summary' | 'note'>('perio');
   const [selectedTooth, setSelectedTooth] = useState<number>(14);
 
   const [loading, setLoading] = useState(false);
@@ -77,6 +77,8 @@ function ChartContent() {
   const [transcript, setTranscript] = useState<string>('');
   const [clinicalEntries, setClinicalEntries] = useState<ClinicalEntry[]>([]);
   const [summaryReport, setSummaryReport] = useState<SummaryReport | null>(null);
+  const [aiNote, setAiNote] = useState<any>({ status: 'draft', sections: {} });
+  const [noteSaving, setNoteSaving] = useState(false);
   const [hoveredQuote, setHoveredQuote] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [diarizationStatus, setDiarizationStatus] = useState<ClinicalSession['diarization_status']>('not_run');
@@ -140,6 +142,7 @@ function ChartContent() {
         setTranscript(session.transcript || '');
         setClinicalEntries((session.clinical_entries as ClinicalEntry[]) || []);
         setSummaryReport((session.summary_report as SummaryReport) || null);
+        setAiNote(session.ai_note || { status: 'draft', sections: { chief_complaint: '', findings: '', assessment: '', plan: '', instructions: '' } });
         setDiarizationStatus(session.diarization_status || 'not_run');
         setSpeakersSwapped(!!session.speakers_swapped);
 
@@ -370,7 +373,7 @@ function ChartContent() {
       {/* Tabs */}
       <div style={{display:'flex',gap:'4px',borderBottom:'1px solid var(--border)',marginBottom:'16px'}}>
         {TABS.map((t, idx) => {
-          const tabKey = idx === 0 ? 'perio' : idx === 1 ? 'entries' : 'summary';
+          const tabKey = idx === 0 ? 'perio' : idx === 1 ? 'entries' : idx === 2 ? 'summary' : 'note';
           const active = activeTab === tabKey;
           return (
             <button
@@ -740,6 +743,24 @@ function ChartContent() {
             </div>
           )}
 
+          {activeTab === 'note' && (
+            <div style={{padding:'20px'}}>
+              <div className="card" style={{padding:'18px'}}>
+                <div style={{fontSize:'15px',fontWeight:700,color:'var(--navy)',marginBottom:'6px'}}>AI Visit Note</div>
+                <div style={{fontSize:'12px',color:'var(--ink3)',marginBottom:'14px'}}>Editable draft for this selected visit. Review before approval.</div>
+                {['chief_complaint','findings','assessment','plan','instructions'].map(section => (
+                  <label key={section} style={{display:'block',fontSize:'11px',fontWeight:700,textTransform:'capitalize',color:'var(--ink3)',marginTop:'10px'}}>
+                    {section.replace('_',' ')}
+                    <textarea className="form-input" value={aiNote.sections?.[section] || ''} onChange={e => setAiNote({...aiNote, sections:{...aiNote.sections,[section]:e.target.value}})} style={{width:'100%',minHeight:'70px',marginTop:'4px'}} />
+                  </label>
+                ))}
+                <div style={{display:'flex',gap:'8px',marginTop:'14px'}}>
+                  <button className="btn-sm btn-ghost" disabled={noteSaving} onClick={async () => { if (!sessionId) return; setNoteSaving(true); await sessionsApi.update(sessionId, { ai_note: {...aiNote, status:'draft'} }); setNoteSaving(false); }}>Save Draft</button>
+                  <button className="btn-sm btn-teal" disabled={noteSaving} onClick={async () => { if (!sessionId) return; setNoteSaving(true); const note={...aiNote,status:'approved'}; await sessionsApi.update(sessionId,{ai_note:note}); setAiNote(note); setNoteSaving(false); }}>Approve Note</button>
+                </div>
+              </div>
+            </div>
+          )}
           {/* TAB 3: SUMMARY REPORT */}
           {activeTab === 'summary' && (
             <div style={{padding:'20px'}}>
