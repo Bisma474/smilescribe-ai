@@ -60,3 +60,17 @@ def test_me_returns_the_authenticated_users_profile(client, registered_user):
 def test_me_rejects_a_garbage_token(client):
     r = client.get("/api/v1/auth/me", headers={"Authorization": "Bearer not-a-real-token"})
     assert r.status_code == 401
+
+
+def test_cors_preflight_for_vercel_origin(client):
+    r = client.options(
+        "/api/v1/auth/me",
+        headers={
+            "Origin": "https://dentalscribeai-n0cigppns-bisma474s-projects.vercel.app",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert r.status_code == 200
+    assert r.headers.get("access-control-allow-origin") == "https://dentalscribeai-n0cigppns-bisma474s-projects.vercel.app"
+
