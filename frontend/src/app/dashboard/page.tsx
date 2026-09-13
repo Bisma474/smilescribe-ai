@@ -87,20 +87,41 @@ export default function DashboardPage() {
       )}
 
       <div className="stat-grid">
-        <div className="stat-card">
+        <div 
+          className="stat-card" 
+          onClick={() => router.push('/dashboard/patients')} 
+          style={{ cursor: 'pointer' }}
+          title="View today's visits"
+        >
           <div className="stat-val">{loading ? '—' : stats?.today_visits ?? 0}</div>
           <div className="stat-lbl">Today&apos;s Visits</div>
         </div>
-        <div className="stat-card">
+        <div 
+          className="stat-card" 
+          onClick={() => router.push('/dashboard/billing')} 
+          style={{ cursor: 'pointer' }}
+          title="Review visits pending billing"
+        >
           <div className="stat-val warn">{loading ? '—' : stats?.pending_review ?? 0}</div>
           <div className="stat-lbl">Pending Review</div>
-          <div className="stat-trend"><span className="text-muted">Needs attention</span></div>
+          <div className="stat-trend"><span className="text-muted">Needs attention →</span></div>
         </div>
-        <div className="stat-card">
+        <div 
+          className="stat-card" 
+          onClick={() => router.push('/dashboard/billing')} 
+          style={{ cursor: 'pointer' }}
+          title="View suggested revenue & billing"
+        >
           <div className="stat-val teal">${loading ? '—' : stats?.revenue_suggested ?? 0}</div>
           <div className="stat-lbl">Revenue Suggested</div>
+          <div className="stat-trend"><span className="text-muted">View details →</span></div>
         </div>
-        <div className="stat-card">
+        <div 
+          className="stat-card" 
+          onClick={() => router.push('/dashboard/patients')} 
+          style={{ cursor: 'pointer' }}
+          title="View active patients"
+        >
           <div className="stat-val">{loading ? '—' : stats?.active_patients ?? 0}</div>
           <div className="stat-lbl">Active Patients</div>
         </div>
