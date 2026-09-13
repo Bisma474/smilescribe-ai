@@ -193,6 +193,7 @@ export const patientsApi = {
   update: (id: number, payload: Partial<PatientCreatePayload>) =>
     request<Patient>(`/patients/${id}`, { method: 'PUT', body: JSON.stringify(payload) }),
   dashboardStats: () => request<DashboardStats>('/patients/dashboard-stats'),
+  remove: (id: number) => request<void>('/patients/' + id, { method: 'DELETE' }),
 };
 
 export const sessionsApi = {
@@ -235,6 +236,7 @@ export const sessionsApi = {
   // to swap).
   generateAiNote: (sessionId: number) =>
     request<ClinicalSession>('/workflow/session/' + sessionId + '/generate-ai-note', { method: 'POST' }),
+  remove: (sessionId: number) => request<void>('/transcription/session/' + sessionId, { method: 'DELETE' }),
   swapSpeakers: (sessionId: number) =>
     request<ClinicalSession>(`/transcription/session/${sessionId}/swap-speakers`, { method: 'PATCH' }),
 };

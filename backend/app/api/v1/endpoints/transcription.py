@@ -280,3 +280,20 @@ def create_session(
     db.commit()
     db.refresh(session)
     return session
+
+@router.delete("/session/{session_id}", status_code=204)
+def delete_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    session = (
+        db.query(SessionModel)
+        .join(PatientModel, SessionModel.patient_id == PatientModel.id)
+        .filter(SessionModel.id == session_id, PatientModel.practice_id == current_user.id)
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Visit not found")
+    db.delete(session)
+    db.commit()

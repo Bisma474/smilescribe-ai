@@ -26,6 +26,7 @@ export default function PatientDetailPage() {
   const [sessions, setSessions] = useState<ClinicalSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!patientId || Number.isNaN(patientId)) {
@@ -65,6 +66,29 @@ export default function PatientDetailPage() {
     );
   }
 
+
+  const deleteVisit = async (session: ClinicalSession) => {
+    if (!window.confirm(`Delete this visit from ${formatDate(session.created_at)}? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      await sessionsApi.remove(session.id);
+      setSessions(current => current.filter(item => item.id !== session.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete visit.');
+    } finally { setDeleting(false); }
+  };
+
+  const deletePatient = async () => {
+    if (!window.confirm(`Delete ${patientName(patient!)} and all of their visits? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      await patientsApi.remove(patientId);
+      router.push('/dashboard/patients');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete patient.');
+      setDeleting(false);
+    }
+  };
   const style = patientRiskStyle(patient.risk_level);
 
   return (
@@ -77,9 +101,12 @@ export default function PatientDetailPage() {
             <div className="page-sub">{patientMeta(patient)}</div>
           </div>
         </div>
-        <button className="btn-primary" onClick={() => router.push(`/dashboard/recording?patientId=${patient.id}`)}>
-          + New Recording
-        </button>
+        <div style={{display:'flex',gap:'8px'}}>
+          <button className="btn-sm btn-ghost" disabled={deleting} onClick={deletePatient} style={{color:'var(--red-dark, #A03030)'}}>Delete Patient</button>
+          <button className="btn-primary" disabled={deleting} onClick={() => router.push(`/dashboard/recording?patientId=${patient.id}`)}>
+            + New Recording
+          </button>
+        </div>
       </div>
 
       {patient.notes && (
@@ -110,7 +137,7 @@ export default function PatientDetailPage() {
                   <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ink)' }}>{formatDate(s.created_at)}</div>
                   <div style={{ fontSize: '11px', color: statusInfo.color, marginTop: '2px' }}>{statusInfo.label}</div>
                 </div>
-                <div style={{ fontSize: '12px', color: 'var(--ink4)' }}>&rsaquo;</div>
+                <button className="btn-sm btn-ghost" disabled={deleting} onClick={(event) => { event.stopPropagation(); deleteVisit(s); }} style={{color:'var(--red-dark, #A03030)'}}>Delete</button>
               </div>
             );
           })
