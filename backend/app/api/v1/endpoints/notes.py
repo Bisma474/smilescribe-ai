@@ -5,6 +5,7 @@ from app.models.patient import Patient as PatientModel
 from app.models.user import User
 from app.models.session import ClinicalSession as SessionModel
 from app.schemas.session import ClinicalSessionUpdate, ClinicalSessionOut
+from app.services.audit_timeline_service import append_audit_event
 
 router = APIRouter()
 
@@ -35,6 +36,8 @@ def update_session(
         if body.status == "submitted" and not (session.clinician_confirmed_procedures or []):
             raise HTTPException(status_code=422, detail="Add and confirm at least one completed procedure before submitting.")
         session.status = body.status
+        if body.status == "submitted":
+            append_audit_event(session, "visit_submitted", "Submitted visit for billing.")
     if body.transcript is not None:
         session.transcript = body.transcript
     if body.perio_data is not None:

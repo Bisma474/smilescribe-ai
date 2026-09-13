@@ -8,6 +8,7 @@ from app.services.coding_service import search_catalog, validate_confirmed_proce
 from app.services.ai_note_service import generate_visit_note
 from app.services.follow_up_service import build_follow_up_draft
 from app.services.risk_flag_service import derive_risk_flags
+from app.services.audit_timeline_service import append_audit_event
 
 router = APIRouter()
 
@@ -45,6 +46,7 @@ def save_confirmed_procedures(session_id: int, procedures: list[dict], db: Sessi
     if errors:
         raise HTTPException(422, {"errors": errors})
     session.clinician_confirmed_procedures = [{**p, "status": "confirmed"} for p in procedures]
+    append_audit_event(session, "procedures_confirmed", f"Confirmed {len(procedures)} completed procedure(s).")
     db.commit()
     db.refresh(session)
     return session
@@ -55,6 +57,7 @@ def save_ai_note(session_id: int, note: dict, db: Session = Depends(get_db), cur
     if not isinstance(note.get("sections", {}), dict):
         raise HTTPException(422, "AI note requires structured sections")
     session.ai_note = note
+    append_audit_event(session, "ai_note_saved", "Saved an AI visit note.")
     db.commit()
     db.refresh(session)
     return session
@@ -63,6 +66,7 @@ def generate_ai_note(session_id: int, db: Session = Depends(get_db), current_use
     session = _owned_session(db, session_id, current_user)
     note = generate_visit_note(session.transcript or "", session.clinical_entries or [])
     session.ai_note = note
+    append_audit_event(session, "ai_note_generated", "Generated an AI visit note draft.")
     db.commit()
     db.refresh(session)
     return session
@@ -86,6 +90,7 @@ def generate_follow_up(session_id: int, db: Session = Depends(get_db), current_u
     session = _owned_session(db, session_id, current_user)
     patient = db.query(Patient).filter(Patient.id == session.patient_id).first()
     session.follow_up_draft = build_follow_up_draft(f"{patient.first_name} {patient.last_name}".strip(), session.treatment_opportunities or [])
+    append_audit_event(session, "follow_up_generated", "Generated an appointment follow-up draft.")
     db.commit()
     db.refresh(session)
     return session
@@ -107,3 +112,7 @@ def compare_visits(session_id: int, db: Session = Depends(get_db), current_user:
 def risk_flags(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     session = _owned_session(db, session_id, current_user)
     return derive_risk_flags(session.clinical_entries or [], session.medications_allergies or {})
+@router.get("/session/{session_id}/timeline")
+def audit_timeline(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    session = _owned_session(db, session_id, current_user)
+    return session.audit_timeline or []

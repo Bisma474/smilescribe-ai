@@ -15,6 +15,7 @@ class ClinicalSessionBase(BaseModel):
     ai_note: Dict[str, Any] | None = None
     medications_allergies: Dict[str, Any] | None = None
     follow_up_draft: Dict[str, Any] | None = None
+    audit_timeline: List[Dict[str, Any]] | None = None
 
 class ClinicalSessionCreate(ClinicalSessionBase):
     pass
@@ -31,6 +32,7 @@ class ClinicalSessionUpdate(BaseModel):
     ai_note: Dict[str, Any] | None = None
     medications_allergies: Dict[str, Any] | None = None
     follow_up_draft: Dict[str, Any] | None = None
+    audit_timeline: List[Dict[str, Any]] | None = None
 
 class ClinicalSessionOut(ClinicalSessionBase):
     id: int

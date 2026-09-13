@@ -157,9 +157,17 @@ export interface ClinicalSession {
   error_message?: string | null;
   ai_note?: any;
   clinician_confirmed_procedures?: any[];
+  medications_allergies?: any;
+  follow_up_draft?: any;
+  audit_timeline?: AuditTimelineEvent[];
   created_at: string;
 }
 
+export interface AuditTimelineEvent {
+  event: string;
+  detail: string;
+  occurred_at: string;
+}
 export interface AuditLog {
   id: number;
   timestamp: string;
@@ -226,6 +234,8 @@ export const workflowApi = {
   reviewTasks: () => request<any[]>('/workflow/review-tasks'),
   saveConfirmedProcedures: (sessionId: number, procedures: any[]) =>
     request<ClinicalSession>('/workflow/session/' + sessionId + '/confirmed-procedures', { method: 'PUT', body: JSON.stringify(procedures) }),
+  timeline: (sessionId: number) =>
+    request<AuditTimelineEvent[]>("/workflow/session/" + sessionId + "/timeline"),
 };
 
 export const logsApi = {

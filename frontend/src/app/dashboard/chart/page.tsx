@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { patientsApi, sessionsApi, logsApi, type Patient, type ClinicalSession } from '@/lib/apiClient';
+import { patientsApi, sessionsApi, logsApi, workflowApi, type Patient, type ClinicalSession, type AuditTimelineEvent } from '@/lib/apiClient';
 import { patientName as formatPatientName, patientMeta as formatPatientMeta } from '@/lib/patientDisplay';
 import { useAuth } from '@/store/AuthContext';
 
@@ -78,6 +78,7 @@ function ChartContent() {
   const [clinicalEntries, setClinicalEntries] = useState<ClinicalEntry[]>([]);
   const [summaryReport, setSummaryReport] = useState<SummaryReport | null>(null);
   const [aiNote, setAiNote] = useState<any>({ status: 'draft', sections: {} });
+  const [auditTimeline, setAuditTimeline] = useState<AuditTimelineEvent[]>([]);
   const [noteSaving, setNoteSaving] = useState(false);
   const [hoveredQuote, setHoveredQuote] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -145,6 +146,7 @@ function ChartContent() {
         setClinicalEntries((session.clinical_entries as ClinicalEntry[]) || []);
         setSummaryReport((session.summary_report as SummaryReport) || null);
         setAiNote(session.ai_note || { status: 'draft', sections: { chief_complaint: '', findings: '', assessment: '', plan: '', instructions: '' } });
+        setAuditTimeline(await workflowApi.timeline(session.id));
         setDiarizationStatus(session.diarization_status || 'not_run');
         setSpeakersSwapped(!!session.speakers_swapped);
 
@@ -838,6 +840,22 @@ function ChartContent() {
                 )}
               </div>
 
+
+              <div className="card" style={{padding:'18px'}}>
+                <div style={{fontSize:'15px',fontWeight:700,color:'var(--navy)',marginBottom:'10px'}}>Visit activity</div>
+                {auditTimeline.length === 0 ? (
+                  <div style={{fontSize:'12px',color:'var(--ink3)'}}>No recorded review activity for this visit yet.</div>
+                ) : (
+                  <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
+                    {auditTimeline.slice().reverse().map((item, index) => (
+                      <div key={item.occurred_at + index} style={{borderLeft:'2px solid var(--teal)',paddingLeft:'10px'}}>
+                        <div style={{fontSize:'12px',fontWeight:700,color:'var(--navy)'}}>{item.detail}</div>
+                        <div style={{fontSize:'10px',color:'var(--ink3)',marginTop:'2px'}}>{new Date(item.occurred_at).toLocaleString()}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               {summaryReport && (
                 <div style={{display:'flex',justifyContent:'flex-end',alignItems:'center',background:'var(--navy)',borderRadius:'12px',padding:'14px 20px',color:'white'}}>
                   <button className="btn-sm btn-teal" onClick={() => router.push(`/dashboard/billing?patientId=${patientId}${sessionId ? `&sessionId=${sessionId}` : ''}`)}>Go to Billing Details →</button>
