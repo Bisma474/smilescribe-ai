@@ -498,8 +498,21 @@ function BillingContent() {
               </div>
 
               {allFindingsList.length === 0 ? (
-                <div style={{padding:'18px 16px',fontSize:'12.5px',color:'var(--ink2)',lineHeight:1.55}}>
-                  No procedure suggestions were identified for this visit. Use "+ Type Custom Procedure &amp; Fee" above to manually enter completed procedures and billing fees.
+                <div style={{padding:'24px 16px',textAlign:'center',background:'var(--surface)',borderRadius:'8px',margin:'12px'}}>
+                  <div style={{fontSize:'13px',fontWeight:600,color:'var(--navy)',marginBottom:'6px'}}>
+                    No CDT procedure codes were suggested by AI for this visit.
+                  </div>
+                  <div style={{fontSize:'12px',color:'var(--ink3)',marginBottom:'14px'}}>
+                    You can manually type and add the final procedure details, CDT codes, and fees for this patient's bill below.
+                  </div>
+                  <button 
+                    type="button" 
+                    className="btn-sm btn-teal" 
+                    onClick={() => setShowManualForm(true)}
+                    style={{display:'inline-flex',alignItems:'center',gap:'6px'}}
+                  >
+                    ✏️ Type Manual Bill &amp; Fee Entry
+                  </button>
                 </div>
               ) : (
                 allFindingsList.map((c, i) => (
