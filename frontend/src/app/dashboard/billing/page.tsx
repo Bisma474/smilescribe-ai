@@ -26,6 +26,7 @@ function BillingContent() {
   const [patientName, setPatientName] = useState<string>('');
   const [patientMeta, setPatientMeta] = useState<string>('');
   const [sessionId, setSessionId] = useState<number | null>(null);
+  const [sessionStatus, setSessionStatus] = useState('');
   const [summaryReport, setSummaryReport] = useState<any>(null);
 
   const [allFindingsList, setAllFindingsList] = useState<CdtItem[]>([]);
@@ -88,6 +89,7 @@ function BillingContent() {
           ? await sessionsApi.getById(sessIdFromUrl)
           : await sessionsApi.getActive(patientId);
         setSessionId(session.id);
+        setSessionStatus(session.status);
         setConfirmedProcedures(session.clinician_confirmed_procedures || []);
         
         let mapped: CdtItem[] = [];
@@ -166,6 +168,7 @@ function BillingContent() {
         await sessionsApi.update(sessionId, { status: 'submitted' });
       }
       
+      setSessionStatus('submitted');
       await handleAction('Claim submitted successfully to insurance.', 'Submitted');
       
       setTimeout(() => {
@@ -284,8 +287,8 @@ function BillingContent() {
             &larr; Switch Patient
           </button>
           <button className="btn-sm btn-ghost" disabled={submitting} onClick={() => handleAction('Visit claim exported successfully.', 'Exported')}>Export Claim</button>
-          <button className="btn-sm btn-teal" disabled={submitting || confirmedProcedures.length === 0} onClick={handleSubmitClaim}>
-            {submitting ? 'Submitting...' : 'Submit to Insurance →'}
+          <button className="btn-sm btn-teal" disabled={submitting || sessionStatus === 'submitted' || confirmedProcedures.length === 0} onClick={handleSubmitClaim}>
+            {sessionStatus === 'submitted' ? 'Visit Submitted' : submitting ? 'Submitting...' : 'Submit to Insurance →'}
           </button>
         </div>
       </div>
@@ -394,8 +397,8 @@ function BillingContent() {
             )}
 
             <div style={{display:'flex',flexDirection:'column',gap:'8px',marginTop:'20px'}}>
-              <button className="btn-primary" disabled={submitting || confirmedProcedures.length === 0} onClick={handleSubmitClaim}>
-                {submitting ? 'Submitting claim...' : 'Submit Visit & Return to Dashboard'}
+              <button className="btn-primary" disabled={submitting || sessionStatus === 'submitted' || confirmedProcedures.length === 0} onClick={handleSubmitClaim}>
+                {sessionStatus === 'submitted' ? 'Visit Submitted' : submitting ? 'Submitting claim...' : 'Submit Visit & Return to Dashboard'}
               </button>
               <button className="btn-outline" disabled={submitting} onClick={() => handleAction('Visit details saved as draft.', 'Draft Saved')}>Save as Draft</button>
             </div>
