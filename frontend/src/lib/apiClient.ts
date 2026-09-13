@@ -223,6 +223,7 @@ export const sessionsApi = {
 };
 
 export const workflowApi = {
+  reviewTasks: () => request<any[]>('/workflow/review-tasks'),
   saveConfirmedProcedures: (sessionId: number, procedures: any[]) =>
     request<ClinicalSession>('/workflow/session/' + sessionId + '/confirmed-procedures', { method: 'PUT', body: JSON.stringify(procedures) }),
 };

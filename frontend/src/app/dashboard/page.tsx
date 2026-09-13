@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { patientsApi, type DashboardStats, type RecentSession } from '@/lib/apiClient';
+import { patientsApi, workflowApi, type DashboardStats, type RecentSession } from '@/lib/apiClient';
 import { useAuth } from '@/store/AuthContext';
 
 function timeAgo(iso: string): string {
@@ -43,6 +43,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reviewTasks, setReviewTasks] = useState<any[]>([]);
 
   useEffect(() => {
     const load = async () => {
@@ -51,6 +52,7 @@ export default function DashboardPage() {
         setError(null);
         const data = await patientsApi.dashboardStats();
         setStats(data);
+        setReviewTasks(await workflowApi.reviewTasks());
       } catch (err) {
         console.error('Failed to load dashboard stats:', err);
         setError(err instanceof Error ? err.message : 'Failed to load dashboard data.');
@@ -127,6 +129,12 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {reviewTasks.length > 0 && (
+        <div className="card" style={{marginBottom:'20px'}}>
+          <div className="section-label mb-12">Review tasks</div>
+          {reviewTasks.slice(0, 6).map((task, index) => <button key={index} onClick={() => router.push('/dashboard/chart?patientId=' + task.patient_id + '&sessionId=' + task.session_id)} style={{display:'flex',width:'100%',justifyContent:'space-between',gap:'12px',padding:'10px 0',border:'none',borderBottom:'1px solid var(--border)',background:'transparent',cursor:'pointer',textAlign:'left'}}><span><strong>{task.patient_name}</strong> · {task.task}</span><span style={{color:'var(--teal-dark)'}}>Review →</span></button>)}
+        </div>
+      )}
       <div style={{display:'grid',gridTemplateColumns:'1fr',gap:'20px'}}>
         <div>
           <div className="section-label mb-12">Recent Activity</div>
