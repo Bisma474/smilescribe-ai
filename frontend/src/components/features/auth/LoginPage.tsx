@@ -14,8 +14,8 @@ export default function LoginPage() {
   const [error, setError] = useState('');
 
   // Login state
-  const [email, setEmail] = useState('dr.kim@brightsmile.com');
-  const [password, setPassword] = useState('Demo@12345');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   // Register state
   const [regEmail, setRegEmail] = useState('');
@@ -163,28 +163,6 @@ export default function LoginPage() {
                 <div style={{fontFamily:'var(--font-display)',fontSize:'24px',color:'var(--navy)',marginBottom:'4px'}}>Welcome back</div>
                 <div style={{fontSize:'13px',color:'var(--ink3)',marginBottom:'16px'}}>Sign in to your practice account</div>
 
-                {/* Demo Credentials Info Banner */}
-                <div style={{
-                  background: 'rgba(74, 191, 176, 0.08)',
-                  border: '1px solid rgba(74, 191, 176, 0.25)',
-                  borderRadius: '12px',
-                  padding: '12px 16px',
-                  fontSize: '12px',
-                  lineHeight: '1.5',
-                  color: '#1b6b61',
-                  marginBottom: '20px',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '8px'
-                }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginTop:'2px',flexShrink:0}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                  <div>
-                    <div style={{ fontWeight: '700', marginBottom: '2px' }}>Demo Credentials (Pre-filled):</div>
-                    <div>Email: <strong style={{ userSelect: 'all' }}>dr.kim@brightsmile.com</strong></div>
-                    <div>Password: <strong style={{ userSelect: 'all' }}>Demo@12345</strong></div>
-                  </div>
-                </div>
-
                 <label className="form-label">Practice email</label>
                 <input
                   className="form-input"
@@ -219,25 +197,6 @@ export default function LoginPage() {
 
                 <button className="btn-primary" type="submit" disabled={loading} style={{opacity:loading?0.7:1}}>
                   {loading ? 'Signing in…' : 'Sign In to Practice'}
-                </button>
-                <button
-                  type="button"
-                  className="btn-outline"
-                  style={{marginTop:'10px'}}
-                  onClick={async () => {
-                    setLoading(true);
-                    setError('');
-                    try {
-                      await login('dr.kim@brightsmile.com', 'Demo@12345');
-                      router.push('/dashboard');
-                    } catch (err: unknown) {
-                      setError(err instanceof Error ? err.message : 'Demo login failed');
-                    } finally {
-                      setLoading(false);
-                    }
-                  }}
-                >
-                  Enter Demo App
                 </button>
                 <div className="divider-or">or</div>
                 <GoogleButton loading={googleLoading} onClick={handleGoogleLogin} />
