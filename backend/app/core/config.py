@@ -1,6 +1,6 @@
 import json
-from typing import List
-from pydantic import Field
+from typing import List, Any
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -33,6 +33,13 @@ class Settings(BaseSettings):
 
     # SQLAlchemy points at the Supabase Postgres connection pooler (Transaction mode)
     DATABASE_URL: str = "postgresql://postgres:password@db.xxxx.supabase.co:5432/postgres"
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def assemble_db_connection(cls, v: Any) -> str:
+        if isinstance(v, str) and v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql://", 1)
+        return v
 
     # ── Auth ─────────────────────────────────────────────────────────────────
     # Auth is delegated to Supabase Auth — token issuance/verification and
