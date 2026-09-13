@@ -55,30 +55,79 @@ CRITICAL RULES:
 Return ONLY valid JSON, no markdown, no explanation."""
 
 
-def extract_chart(transcript: str, pageindex_context: str = "") -> list[dict]:
-    """Extract clinical findings from a transcript via the LLM.
+CHUNK_THRESHOLD_CHARS = 3500  # Transcripts longer than this trigger chunked processing
+TARGET_CHUNK_CHARS = 2800     # Preferred size per chunk
+CHUNK_OVERLAP_CHARS = 250     # Overlap with preceding chunk
 
-    openai/gpt-oss-120b is a reasoning model — without reasoning_effort
-    capped and a generous max_completion_tokens, it was observed (live,
-    reproduced directly against the Groq API) to spend its entire token
-    budget on internal chain-of-thought before ever emitting the JSON
-    response, returning a completely empty completion. Groq's own
-    json_object validator then rejects that empty output with a 400
-    'json_validate_failed' and an empty failed_generation, which looks
-    like a transient API error but is actually deterministic for a given
-    transcript — reproduced identically on every retry until these
-    params were added. reasoning_effort='low' is enough for a
-    straightforward extraction task like this one.
 
-    As defense in depth (the params above fixed every case tested, but
-    Groq's own API can still fail for unrelated reasons — rate limits,
-    an outage, etc.), the call is still retried once, and if it fails
-    even after that, this returns a synthetic error entry instead of
-    raising — the caller (session_pipeline) already has a real, saved
-    transcript by this point, so an extraction failure shouldn't throw
-    that away and mark the whole visit as failed. The synthetic error
-    entry is rendered as a visible "Extraction error" card on the Chart
-    page rather than silently vanishing (see chart_mapping.py)."""
+def split_transcript_into_chunks(transcript: str, target_size: int = TARGET_CHUNK_CHARS, overlap: int = CHUNK_OVERLAP_CHARS) -> list[dict]:
+    """Split a long transcript into overlapping chunks at natural sentence or speaker turn boundaries.
+    
+    Returns a list of dicts: [{'text': str, 'start_offset': int, 'end_offset': int, 'index': int}]
+    """
+    if len(transcript) <= CHUNK_THRESHOLD_CHARS:
+        return [{"text": transcript, "start_offset": 0, "end_offset": len(transcript), "index": 0}]
+
+    chunks = []
+    total_len = len(transcript)
+    curr_start = 0
+
+    while curr_start < total_len:
+        raw_end = min(curr_start + target_size, total_len)
+
+        if raw_end >= total_len:
+            actual_end = total_len
+        else:
+            search_window = transcript[max(curr_start, raw_end - 400):min(total_len, raw_end + 200)]
+            matches = list(re.finditer(r"(\n+|[.!?]\s+)", search_window))
+            if matches:
+                best_match = min(matches, key=lambda m: abs((max(curr_start, raw_end - 400) + m.end()) - raw_end))
+                actual_end = max(curr_start, raw_end - 400) + best_match.end()
+            else:
+                actual_end = raw_end
+
+        chunk_text = transcript[curr_start:actual_end]
+        chunks.append({
+            "text": chunk_text,
+            "start_offset": curr_start,
+            "end_offset": actual_end,
+            "index": len(chunks),
+        })
+
+        if actual_end >= total_len:
+            break
+
+        next_start = max(actual_end - overlap, curr_start + 100)
+        snap_space = transcript.find(" ", next_start, min(total_len, next_start + 50))
+        if snap_space != -1:
+            curr_start = snap_space + 1
+        else:
+            curr_start = next_start
+
+    return chunks
+
+
+def _deduplicate_findings(findings: list[dict], transcript: str) -> list[dict]:
+    """Deduplicate findings extracted across multiple overlapping transcript chunks."""
+    deduped = []
+    seen = set()
+
+    for f in findings:
+        tooth = str(f.get("tooth_number", "")).strip().upper()
+        surface = str(f.get("surface", "")).strip().upper()
+        finding_type = str(f.get("finding", "")).strip().lower()
+        start = f.get("char_offset_start", -1)
+
+        key = (tooth, surface, finding_type, start // 150 if start != -1 else start)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(f)
+
+    return deduped
+
+
+def _extract_single_pass(transcript: str, pageindex_context: str = "") -> list[dict]:
     system_msg = EXTRACTION_PROMPT
     if pageindex_context:
         system_msg += f"\n\nRelevant dental knowledge context:\n{pageindex_context}"
@@ -105,6 +154,60 @@ def extract_chart(transcript: str, pageindex_context: str = "") -> list[dict]:
 
     logger.error("extract_chart failed after retry: %s", last_error)
     return [{"error": "AI chart extraction failed after retrying", "raw": str(last_error)}]
+
+
+def extract_chart_chunked(transcript: str, pageindex_context: str = "") -> list[dict]:
+    """Extract findings from long transcripts by chunking, running per-chunk LLM extraction,
+    translating relative offsets to master transcript offsets, and deduplicating results."""
+    chunks = split_transcript_into_chunks(transcript)
+    if len(chunks) == 1:
+        return _extract_single_pass(transcript, pageindex_context)
+
+    all_findings = []
+    failed_chunks = 0
+
+    for chunk in chunks:
+        chunk_text = chunk["text"]
+        chunk_offset = chunk["start_offset"]
+
+        chunk_findings = _extract_single_pass(chunk_text, pageindex_context)
+
+        for finding in chunk_findings:
+            if "error" in finding:
+                failed_chunks += 1
+                continue
+
+            rel_start = finding.get("char_offset_start", -1)
+            rel_end = finding.get("char_offset_end", -1)
+            if rel_start != -1 and rel_end != -1:
+                abs_start = chunk_offset + rel_start
+                abs_end = chunk_offset + rel_end
+                finding["char_offset_start"] = abs_start
+                finding["char_offset_end"] = abs_end
+
+                quote = finding.get("verbatim_quote", "")
+                if quote and transcript[abs_start:abs_end] != quote:
+                    actual_abs = transcript.find(quote, max(0, abs_start - 300))
+                    if actual_abs != -1:
+                        finding["char_offset_start"] = actual_abs
+                        finding["char_offset_end"] = actual_abs + len(quote)
+
+            finding["chunk_index"] = chunk["index"]
+            all_findings.append(finding)
+
+    if failed_chunks == len(chunks) and not all_findings:
+        return [{"error": "AI chart extraction failed across all transcript chunks", "raw": "All chunks failed"}]
+
+    return _deduplicate_findings(all_findings, transcript)
+
+
+def extract_chart(transcript: str, pageindex_context: str = "") -> list[dict]:
+    """Extract clinical findings from a transcript via the LLM.
+    Automatically uses chunked extraction for long transcripts (>3500 chars).
+    """
+    if len(transcript) > CHUNK_THRESHOLD_CHARS:
+        return extract_chart_chunked(transcript, pageindex_context)
+    return _extract_single_pass(transcript, pageindex_context)
 
 
 _VALID_UNIVERSAL_TEETH = {str(number) for number in range(1, 33)}
