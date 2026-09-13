@@ -88,3 +88,17 @@ def generate_follow_up(session_id: int, db: Session = Depends(get_db), current_u
     db.commit()
     db.refresh(session)
     return session
+@router.get("/session/{session_id}/comparison")
+def compare_visits(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    current = _owned_session(db, session_id, current_user)
+    previous = db.query(ClinicalSession).filter(ClinicalSession.patient_id == current.patient_id, ClinicalSession.created_at < current.created_at, ClinicalSession.status.in_(["complete", "submitted"])).order_by(ClinicalSession.created_at.desc()).first()
+    if not previous:
+        return {"previous_session_id": None, "new_findings": current.clinical_entries or [], "resolved_findings": [], "perio_change": "No prior completed visit available."}
+    current_labels = {str(item.get("label") or "") for item in (current.clinical_entries or [])}
+    previous_labels = {str(item.get("label") or "") for item in (previous.clinical_entries or [])}
+    return {
+        "previous_session_id": previous.id,
+        "new_findings": [item for item in (current.clinical_entries or []) if str(item.get("label") or "") not in previous_labels],
+        "resolved_findings": [item for item in (previous.clinical_entries or []) if str(item.get("label") or "") not in current_labels],
+        "perio_change": "Compare periodontal measurements in the selected visit charts.",
+    }
