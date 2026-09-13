@@ -751,13 +751,13 @@ function ChartContent() {
                 {['chief_complaint','findings','assessment','plan','instructions'].map(section => (
                   <label key={section} style={{display:'block',fontSize:'11px',fontWeight:700,textTransform:'capitalize',color:'var(--ink3)',marginTop:'10px'}}>
                     {section.replace('_',' ')}
-                    <textarea className="form-input" value={aiNote.sections?.[section] || ''} onChange={e => setAiNote({...aiNote, sections:{...aiNote.sections,[section]:e.target.value}})} style={{width:'100%',minHeight:'70px',marginTop:'4px'}} />
+                    <textarea className="form-input" value={aiNote.sections?.[section] || ''} onChange={e => setAiNote({...aiNote, status:'draft', sections:{...aiNote.sections,[section]:e.target.value}})} style={{width:'100%',minHeight:'70px',marginTop:'4px'}} />
                   </label>
                 ))}
                 <div style={{display:'flex',gap:'8px',marginTop:'14px'}}>
                   <button className="btn-sm btn-ghost" disabled={noteSaving} onClick={async () => { if (!sessionId) return; setNoteSaving(true); try { const updated = await sessionsApi.generateAiNote(sessionId); setAiNote(updated.ai_note || aiNote); } finally { setNoteSaving(false); } }}>{noteSaving ? 'Generating...' : 'Generate AI Note'}</button>
                   <button className="btn-sm btn-ghost" disabled={noteSaving} onClick={async () => { if (!sessionId) return; setNoteSaving(true); try { await sessionsApi.update(sessionId, { ai_note: {...aiNote, status:'draft'} }); } finally { setNoteSaving(false); } }}>Save Draft</button>
-                  <button className="btn-sm btn-teal" disabled={noteSaving || aiNote.status === 'approved'} onClick={async () => { if (!sessionId) return; setNoteSaving(true); try { const note={...aiNote,status:'approved'}; await sessionsApi.update(sessionId,{ai_note:note}); setAiNote(note); } finally { setNoteSaving(false); } }}>{aiNote.status === 'approved' ? 'Approved' : 'Approve Note'}</button>
+                  <button className="btn-sm btn-teal" disabled={noteSaving} onClick={async () => { if (!sessionId) return; setNoteSaving(true); try { const note={...aiNote,status: aiNote.status === 'approved' ? 'draft' : 'approved'}; await sessionsApi.update(sessionId,{ai_note:note}); setAiNote(note); } finally { setNoteSaving(false); } }}>{aiNote.status === 'approved' ? 'Reopen Draft' : 'Approve Note'}</button>
                 </div>
               </div>
             </div>
