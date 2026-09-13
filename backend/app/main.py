@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
         Base.metadata.create_all(bind=engine)
         logger.info("✅ Database tables ready")
     except Exception as e:
-        logger.warning(f"⚠️ Database connection failed: {e}. Running in offline/mock mode.")
+        logger.error(f"⚠️ Database connection failed ({type(e).__name__}: {e}). Running in offline/mock mode.")
     yield
     # Shutdown
     engine.dispose()
