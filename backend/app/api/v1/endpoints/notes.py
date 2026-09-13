@@ -29,8 +29,7 @@ def update_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if body.status is not None:
-        session.status = body.status
+    if body.status is not None:`r`n        if session.status == "submitted":`r`n            raise HTTPException(status_code=409, detail="This visit was already submitted and cannot be submitted again.")`r`n        if body.status == "submitted" and not (session.clinician_confirmed_procedures or []):`r`n            raise HTTPException(status_code=422, detail="Add and confirm at least one completed procedure before submitting.")`r`n        session.status = body.status
     if body.transcript is not None:
         session.transcript = body.transcript
     if body.perio_data is not None:
