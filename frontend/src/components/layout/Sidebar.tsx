@@ -44,7 +44,7 @@ export default function Sidebar({ isOpen, onClose }: Props) {
             {n.icon}
           </svg>
           {n.label}
-          {n.badge && <span className={`nav-badge${n.badgeType==='warn'?' warn':''}`}>{n.badge}</span>}
+          {n.badge && <span className={`nav-badge${n.badge==='2'?' warn':''}`}>{n.badge}</span>}
         </div>
       ))}
 
