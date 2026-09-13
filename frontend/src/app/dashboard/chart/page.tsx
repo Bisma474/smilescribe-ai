@@ -1,6 +1,6 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { patientsApi, sessionsApi, logsApi, type Patient, type ClinicalSession } from '@/lib/apiClient';
 import { patientName as formatPatientName, patientMeta as formatPatientMeta } from '@/lib/patientDisplay';
 import { useAuth } from '@/store/AuthContext';
@@ -15,16 +15,6 @@ interface ToothInfo {
   label?: string;
 }
 
-const DEFAULT_PERIO_DATA: Record<number, ToothInfo> = {};
-
-// A genuinely blank perio chart — the AI extraction service doesn't
-// produce structured 6-point probing data (that's a deliberately manual,
-// dentist-entered flow), so every tooth starts at the same neutral
-// baseline with no label/finding. Previously this seeded three specific
-// teeth (3, 14, 32) with a fixed set of demo findings ("Deep pocketing —
-// active disease", etc.) that got saved back to a session as if real —
-// every patient's very first chart view would silently acquire the same
-// three fake findings.
 const generateDefaultPerioData = (): Record<number, ToothInfo> => {
   const initialData: Record<number, ToothInfo> = {};
   for (let i = 1; i <= 32; i++) {
@@ -60,26 +50,20 @@ interface SummaryReport {
   est_recovery?: number | null;
 }
 
-export default function ChartPage() {
+function ChartContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
-  
-  // null = not yet determined whether the URL even has a patientId.
-  // Previously defaulted silently to a hardcoded id (2) when absent — a
-  // ghost patient from the old demo data that doesn't exist in a real
-  // practice's data, so reaching this page via the sidebar/bottom-tab nav
-  // (neither of which passes a patientId) would try to load a nonexistent
-  // patient and render nothing.
+
   const [patientId, setPatientId] = useState<number | null>(null);
   const [patientName, setPatientName] = useState<string>('');
   const [patientMeta, setPatientMeta] = useState<string>('');
   const [sessionId, setSessionId] = useState<number | null>(null);
 
-  // Shown instead of chart data when no patientId is in the URL.
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loadingPatients, setLoadingPatients] = useState(false);
   const [patientsError, setPatientsError] = useState('');
-  
+
   const [activeTab, setActiveTab] = useState<'perio' | 'entries' | 'summary'>('perio');
   const [selectedTooth, setSelectedTooth] = useState<number>(14);
 
@@ -87,10 +71,8 @@ export default function ChartPage() {
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
 
-  // Perio data state
   const [perioData, setPerioData] = useState<Record<number, ToothInfo>>(() => generateDefaultPerioData());
 
-  // Real session data — transcript, AI-extracted clinical entries, summary
   const [transcript, setTranscript] = useState<string>('');
   const [clinicalEntries, setClinicalEntries] = useState<ClinicalEntry[]>([]);
   const [summaryReport, setSummaryReport] = useState<SummaryReport | null>(null);
@@ -101,19 +83,12 @@ export default function ChartPage() {
   const [swapping, setSwapping] = useState(false);
 
   useEffect(() => {
-    // Read patientId from URL parameters safely in browser
-    const params = new URLSearchParams(window.location.search);
-    const pIdStr = params.get('patientId');
+    const pIdStr = searchParams.get('patientId');
     const pId = pIdStr ? parseInt(pIdStr, 10) : NaN;
-    // Optional — set when reached from a patient's Recording History list
-    // to view one specific past visit rather than always the latest.
-    const sessIdStr = params.get('sessionId');
+    const sessIdStr = searchParams.get('sessionId');
     const sessIdFromUrl = sessIdStr ? parseInt(sessIdStr, 10) : NaN;
 
     if (!pIdStr || Number.isNaN(pId)) {
-      // No patient in context (e.g. reached via sidebar/bottom-tab nav,
-      // not a patient's own page) or a malformed patientId — show a
-      // picker instead of guessing or passing NaN to the API.
       let cancelled = false;
       setLoadingPatients(true);
       patientsApi.list()
@@ -130,7 +105,6 @@ export default function ChartPage() {
         setLoading(true);
         setError(null);
 
-        // Log clinical access action (HIPAA)
         try {
           await logsApi.create({
             action: 'Access',
@@ -141,26 +115,20 @@ export default function ChartPage() {
           console.warn('Failed to write audit log:', lErr);
         }
 
-        // 1. Fetch patient details
         const pt = await patientsApi.get(pId);
         setPatientName(formatPatientName(pt));
         setPatientMeta(formatPatientMeta(pt));
 
-        // 2. Fetch session data — a specific past visit if sessionId is in
-        // the URL (from the patient detail page's Recording History list),
-        // otherwise the patient's most recent visit as before.
         const session = Number.isNaN(sessIdFromUrl)
           ? await sessionsApi.getActive(pId)
           : await sessionsApi.getById(sessIdFromUrl);
         setSessionId(session.id);
 
         if (session.perio_data) {
-          // Merge incoming data with default to guarantee 32 teeth exist
           const merged = generateDefaultPerioData();
           Object.assign(merged, session.perio_data);
           setPerioData(merged);
         } else {
-          // If no perio_data exists, save default back to the session
           const initial = generateDefaultPerioData();
           setPerioData(initial);
           await sessionsApi.update(session.id, { perio_data: initial });
@@ -175,9 +143,6 @@ export default function ChartPage() {
         if (session.status === 'error') {
           setError(session.error_message || 'The last recording failed to process.');
         } else if (session.status === 'processing') {
-          // A recording is still being transcribed/analyzed in the
-          // background — whatever transcript/entries/summary are shown
-          // below are from the previous visit, not this one yet.
           setIsProcessing(true);
         }
       } catch (err) {
@@ -189,15 +154,13 @@ export default function ChartPage() {
     };
 
     loadData();
-  }, [user]);
+  }, [searchParams, user]);
 
   const saveToBackend = async (data: Record<number, ToothInfo>, toothEdited: number) => {
     if (!sessionId) return;
     try {
       setSaveStatus('saving');
       await sessionsApi.update(sessionId, { perio_data: data });
-      
-      // Log update action
       try {
         await logsApi.create({
           action: 'Clinical',
@@ -207,7 +170,6 @@ export default function ChartPage() {
       } catch (lErr) {
         console.warn('Failed to write audit log:', lErr);
       }
-      
       setSaveStatus('saved');
     } catch (err) {
       console.error('Failed to auto-save:', err);
@@ -229,15 +191,14 @@ export default function ChartPage() {
     }
   };
 
-  // Helper functions for pocket depth styling
   const getToothBgColor = (t: number) => {
     const tooth = perioData[t];
     if (!tooth) return 'var(--white)';
     const maxDepth = Math.max(...tooth.buccal, ...tooth.lingual);
     if (t === selectedTooth) return 'var(--teal-pale)';
-    if (maxDepth >= 5) return '#FEEEEE'; // Red tinted background
-    if (maxDepth === 4) return '#FFF9E6'; // Yellow tinted background
-    if (tooth.label?.includes('Calculus')) return '#EBF9F7'; // Teal tinted background
+    if (maxDepth >= 5) return '#FEEEEE';
+    if (maxDepth === 4) return '#FFF9E6';
+    if (tooth.label?.includes('Calculus')) return '#EBF9F7';
     return 'var(--white)';
   };
 
@@ -260,10 +221,7 @@ export default function ChartPage() {
       newArray[index] = Math.max(1, Math.min(10, newArray[index] + delta));
       const updated = {
         ...prev,
-        [selectedTooth]: {
-          ...tooth,
-          [type]: newArray
-        }
+        [selectedTooth]: { ...tooth, [type]: newArray }
       };
       saveToBackend(updated, selectedTooth);
       return updated;
@@ -278,10 +236,7 @@ export default function ChartPage() {
       newArray[index] = !newArray[index];
       const updated = {
         ...prev,
-        [selectedTooth]: {
-          ...tooth,
-          [type]: newArray
-        }
+        [selectedTooth]: { ...tooth, [type]: newArray }
       };
       saveToBackend(updated, selectedTooth);
       return updated;
@@ -320,12 +275,21 @@ export default function ChartPage() {
               <div
                 key={p.id}
                 className="patient-card"
-                onClick={() => router.push(`/dashboard/chart?patientId=${p.id}`)}
-                style={{ cursor: 'pointer' }}
+                onClick={() => {
+                  setPatientId(p.id);
+                  router.push(`/dashboard/chart?patientId=${p.id}`);
+                }}
+                style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '14px', padding: '14px 16px', background: 'var(--white)', border: '1px solid var(--border)', borderRadius: '10px' }}
               >
-                <div className="patient-avatar">{formatPatientName(p).split(' ').map(n => n[0]).join('').toUpperCase()}</div>
+                <div className="patient-avatar" style={{ width: '38px', height: '38px', borderRadius: '50%', background: 'var(--teal-pale, #E8F7F5)', color: 'var(--teal-dark, #007A78)', fontWeight: 700, fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  {formatPatientName(p).split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="patient-name">{formatPatientName(p)}</div>
+                  <div className="patient-name" style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--navy)' }}>{formatPatientName(p)}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--ink3)', marginTop: '2px' }}>{formatPatientMeta(p)}</div>
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--teal-dark)', fontWeight: 600 }}>
+                  Open Chart &rarr;
                 </div>
               </div>
             ))}
@@ -353,7 +317,7 @@ export default function ChartPage() {
             )}
           </div>
           <div className="page-sub">
-            {patientName} · {patientMeta} · 17m 04s recorded · Evidence-grounded clinical NLP
+            {patientName} · {patientMeta} · Evidence-grounded clinical NLP
           </div>
         </div>
         <div style={{display:'flex',gap:'8px',flexWrap:'wrap',alignItems:'center'}}>
@@ -362,7 +326,7 @@ export default function ChartPage() {
             Interactive Chart: Click teeth to inspect and edit depths
           </div>
           <button className="btn-sm btn-ghost" onClick={() => setActiveTab('perio')}>✎ Perio Edit</button>
-          <button className="btn-sm btn-teal" onClick={() => router.push(`/dashboard/billing?patientId=${patientId}`)}>Proceed to Billing →</button>
+          <button className="btn-sm btn-teal" onClick={() => router.push(`/dashboard/billing?patientId=${patientId}${sessionId ? `&sessionId=${sessionId}` : ''}`)}>Proceed to Billing →</button>
         </div>
       </div>
 
@@ -391,56 +355,55 @@ export default function ChartPage() {
           marginBottom: '16px',
           fontSize: '12.5px'
         }}>
-          💡 {error}
+          {error}
         </div>
       )}
 
-      <div style={{display:'grid',gridTemplateColumns:'1fr',gap:'16px'}}>
-        {/* Main tabs */}
-        <div className="card" style={{padding:0,overflow:'hidden'}}>
-          <div style={{display:'flex',borderBottom:'1px solid var(--border)',background:'var(--surface)'}}>
-            {[
-              { id: 'perio', label: 'Perio Chart' },
-              { id: 'entries', label: 'Clinical Entries' },
-              { id: 'summary', label: 'Summary Report' }
-            ].map(t => (
-              <button
-                key={t.id}
-                onClick={() => setActiveTab(t.id as any)}
-                style={{
-                  padding:'12px 20px',
-                  fontSize:'13px',
-                  fontWeight:600,
-                  color:activeTab === t.id ? 'var(--teal-dark)' : 'var(--ink3)',
-                  cursor:'pointer',
-                  border:'none',
-                  background:'transparent',
-                  borderBottom: activeTab === t.id ? '2.5px solid var(--teal)' : '2.5px solid transparent',
-                  marginBottom:'-1.5px',
-                  transition:'all 0.15s ease'
-                }}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+      {/* Tabs */}
+      <div style={{display:'flex',gap:'4px',borderBottom:'1px solid var(--border)',marginBottom:'16px'}}>
+        {TABS.map((t, idx) => {
+          const tabKey = idx === 0 ? 'perio' : idx === 1 ? 'entries' : 'summary';
+          const active = activeTab === tabKey;
+          return (
+            <button
+              key={t}
+              onClick={() => setActiveTab(tabKey as any)}
+              style={{
+                padding:'8px 16px',
+                fontSize:'13px',
+                fontWeight: active ? 700 : 500,
+                color: active ? 'var(--teal-dark)' : 'var(--ink3)',
+                borderBottom: active ? '2px solid var(--teal)' : '2px solid transparent',
+                background:'none',
+                borderTop:'none',
+                borderLeft:'none',
+                borderRight:'none',
+                cursor:'pointer'
+              }}
+            >
+              {t}
+            </button>
+          );
+        })}
+      </div>
 
+      {/* Main Grid: Left Tab Content vs Right Transcript */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 400px',gap:'20px',alignItems:'start'}}>
+        <div>
           {/* TAB 1: PERIO CHART */}
           {activeTab === 'perio' && (
-            <div style={{padding:'20px'}}>
-              <div style={{fontSize:'12px',color:'var(--ink2)',marginBottom:'20px',lineHeight:'1.5'}}>
-                Visual pocket depth charting. Clicking on a tooth displays its details. Values of 4 mm or more are highlighted in <span style={{color:'var(--orange-c)',fontWeight:'bold'}}>orange</span> and 5 mm or more in <span style={{color:'var(--red-c)',fontWeight:'bold'}}>red</span>.
-              </div>
-
-              {/* Tooth Chart Row: Upper */}
-              <div style={{marginBottom:'24px'}}>
+            <div style={{padding:'16px'}}>
+              {/* Tooth Arches Display */}
+              <div style={{marginBottom:'20px'}}>
+                {/* Upper Arch */}
                 <div style={{fontSize:'11px',fontWeight:'bold',color:'var(--navy)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:'8px'}}>Maxillary Arch (Upper Teeth 1-16)</div>
                 <div style={{
                   display:'grid',
                   gridTemplateColumns:'repeat(16, minmax(0, 1fr))',
                   gap:'4px',
                   overflowX:'auto',
-                  paddingBottom:'8px'
+                  paddingBottom:'8px',
+                  marginBottom:'16px'
                 }}>
                   {upperTeeth.map(t => {
                     const tooth = perioData[t] || { buccal: [2,2,3], lingual: [2,2,2] };
@@ -484,10 +447,8 @@ export default function ChartPage() {
                     );
                   })}
                 </div>
-              </div>
 
-              {/* Tooth Chart Row: Lower */}
-              <div style={{marginBottom:'24px'}}>
+                {/* Lower Arch */}
                 <div style={{fontSize:'11px',fontWeight:'bold',color:'var(--navy)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:'8px'}}>Mandibular Arch (Lower Teeth 17-32)</div>
                 <div style={{
                   display:'grid',
@@ -640,7 +601,6 @@ export default function ChartPage() {
                             style={{border:'none',background:'none',cursor:'pointer',fontWeight:'bold',color:'var(--ink3)',padding:'0 4px'}}
                           >+</button>
                         </div>
-                        {/* BOP Trigger */}
                         <button
                           onClick={() => toggleBop('bopBuccal', idx)}
                           style={{
@@ -693,7 +653,6 @@ export default function ChartPage() {
                             style={{border:'none',background:'none',cursor:'pointer',fontWeight:'bold',color:'var(--ink3)',padding:'0 4px'}}
                           >+</button>
                         </div>
-                        {/* BOP Trigger */}
                         <button
                           onClick={() => toggleBop('bopLingual', idx)}
                           style={{
@@ -830,7 +789,7 @@ export default function ChartPage() {
 
               {summaryReport && (
                 <div style={{display:'flex',justifyContent:'flex-end',alignItems:'center',background:'var(--navy)',borderRadius:'12px',padding:'14px 20px',color:'white'}}>
-                  <button className="btn-sm btn-teal" onClick={() => router.push(`/dashboard/billing?patientId=${patientId}`)}>Go to Billing Details</button>
+                  <button className="btn-sm btn-teal" onClick={() => router.push(`/dashboard/billing?patientId=${patientId}${sessionId ? `&sessionId=${sessionId}` : ''}`)}>Go to Billing Details →</button>
                 </div>
               )}
             </div>
@@ -882,24 +841,18 @@ export default function ChartPage() {
             </div>
           )}
           <div style={{flex:1,overflowY:'auto',padding:'8px 0',maxHeight:'400px'}}>
-            {!transcript ? (
-              <div style={{padding:'24px 16px',textAlign:'center',fontSize:'12px',color:'var(--ink3)'}}>
-                No transcript yet — record a visit to generate one.
-              </div>
-            ) : (
-              <div style={{padding:'8px 16px',fontSize:'12.5px',color:'var(--ink)',lineHeight:1.7}}>
-                {splitTranscriptTurns(transcript).map((turn, index, turns) => (
-                  <div key={turn.speaker + '-' + index} style={{padding:'8px 0',borderBottom:index === turns.length - 1 ? 'none' : '1px solid rgba(27,58,107,0.08)'}}>
-                    {turn.speaker && (
-                      <span style={{display:'inline-block',minWidth:'62px',marginRight:'8px',fontSize:'10px',fontWeight:800,letterSpacing:'0.06em',color:turn.speaker === 'Dentist' ? 'var(--teal-dark)' : 'var(--navy-mid)'}}>
-                        {turn.speaker.toUpperCase()}
-                      </span>
-                    )}
-                    <span>{renderTranscriptWithHighlight(turn.text, hoveredQuote)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div style={{padding:'8px 16px',fontSize:'12.5px',color:'var(--ink)',lineHeight:1.7}}>
+              {splitTranscriptTurns(transcript).map((turn, index, turns) => (
+                <div key={turn.speaker + '-' + index} style={{padding:'8px 0',borderBottom:index === turns.length - 1 ? 'none' : '1px solid rgba(27,58,107,0.08)'}}>
+                  {turn.speaker && (
+                    <span style={{display:'inline-block',minWidth:'62px',marginRight:'8px',fontSize:'10px',fontWeight:800,letterSpacing:'0.06em',color:turn.speaker === 'Dentist' ? 'var(--teal-dark)' : 'var(--navy-mid)'}}>
+                      {turn.speaker.toUpperCase()}
+                    </span>
+                  )}
+                  <span>{renderTranscriptWithHighlight(turn.text, hoveredQuote)}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -907,11 +860,16 @@ export default function ChartPage() {
   );
 }
 
+export default function ChartPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: '20px', color: 'var(--ink3)', fontSize: '13px' }}>Loading chart review...</div>}>
+      <ChartContent />
+    </Suspense>
+  );
+}
+
 type TranscriptTurn = { speaker: 'Dentist' | 'Patient' | null; text: string };
 
-// Keeps stored transcript text unchanged, but presents every labelled turn on
-// its own row. This also repairs old transcripts where speaker labels were
-// accidentally emitted on the same physical line.
 function splitTranscriptTurns(transcript: string): TranscriptTurn[] {
   const label = /(?:^|\n|\s)(Dentist|Patient):\s*/gi;
   const matches = Array.from(transcript.matchAll(label));
@@ -930,9 +888,7 @@ function splitTranscriptTurns(transcript: string): TranscriptTurn[] {
   }
   return turns;
 }
-// Splits the transcript around the currently-hovered clinical entry's
-// verbatim quote (if it appears) and wraps that span so hovering a
-// clinical entry visually points back to the exact evidence sentence.
+
 function renderTranscriptWithHighlight(transcript: string, hoveredQuote: string | null) {
   if (!hoveredQuote) return transcript;
   const idx = transcript.indexOf(hoveredQuote);
