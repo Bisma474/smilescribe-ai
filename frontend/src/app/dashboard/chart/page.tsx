@@ -84,6 +84,8 @@ function ChartContent() {
   const [diarizationStatus, setDiarizationStatus] = useState<ClinicalSession['diarization_status']>('not_run');
   const [speakersSwapped, setSpeakersSwapped] = useState(false);
   const [swapping, setSwapping] = useState(false);
+  const [voiceCommand, setVoiceCommand] = useState('');
+  const [voiceMessage, setVoiceMessage] = useState('');
 
   useEffect(() => {
     const pIdStr = searchParams.get('patientId');
@@ -195,6 +197,19 @@ function ChartContent() {
     } finally {
       setSwapping(false);
     }
+  };
+
+  const runVoiceCommand = (raw: string) => {
+    const command = raw.toLowerCase().trim();
+    setVoiceCommand(raw);
+    const tooth = command.match(/tooth\s+(\d{1,2})/);
+    if (tooth && Number(tooth[1]) >= 1 && Number(tooth[1]) <= 32) {
+      setSelectedTooth(Number(tooth[1])); setActiveTab('perio'); setVoiceMessage('Selected tooth ' + tooth[1]); return;
+    }
+    if (command.includes('transcript')) { setActiveTab('transcript'); setVoiceMessage('Opened transcript'); return; }
+    if (command.includes('note')) { setActiveTab('note'); setVoiceMessage('Opened AI visit note'); return; }
+    if (command.includes('billing')) { router.push('/dashboard/billing?patientId=' + patientId + (sessionId ? '&sessionId=' + sessionId : '')); return; }
+    setVoiceMessage('Try: open transcript, open note, open billing, or select tooth 14.');
   };
 
   const getToothBgColor = (t: number) => {
@@ -341,6 +356,12 @@ function ChartContent() {
         </div>
       </div>
 
+      <div className="card" style={{padding:'12px 14px',marginBottom:'16px',display:'flex',gap:'8px',alignItems:'center',flexWrap:'wrap'}}>
+        <strong style={{fontSize:'12px',color:'var(--navy)'}}>Voice command</strong>
+        <input className="form-input" aria-label="Voice command" value={voiceCommand} onChange={e => setVoiceCommand(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') runVoiceCommand(voiceCommand); }} placeholder="e.g. open transcript or select tooth 14" style={{maxWidth:'320px'}} />
+        <button className="btn-sm btn-ghost" onClick={() => runVoiceCommand(voiceCommand)}>Run</button>
+        {voiceMessage && <span style={{fontSize:'11px',color:'var(--teal-dark)'}}>{voiceMessage}</span>}
+      </div>
       {isProcessing && (
         <div style={{
           background: '#FFF9E6',
