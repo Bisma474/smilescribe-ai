@@ -29,7 +29,7 @@ const generateDefaultPerioData = (): Record<number, ToothInfo> => {
   return initialData;
 };
 
-const TABS = ['Perio Chart', 'Clinical Entries', 'Summary', 'AI Visit Note', 'Transcript Evidence'];
+const TABS = ['Perio Chart', 'Clinical Entries', 'Summary', 'AI Visit Note', 'Transcript'];
 
 interface ClinicalEntry {
   tooth: string;
@@ -831,7 +831,7 @@ function ChartContent() {
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',borderBottom:'1px solid var(--border)',background:'var(--white)'}}>
             <div style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'12px',fontWeight:700,color:'var(--navy)'}}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-              Transcript · Evidence View
+              Transcript
             </div>
             <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
               {(diarizationStatus === 'success' || diarizationStatus === 'ai_assigned') && (
@@ -847,17 +847,8 @@ function ChartContent() {
               <div style={{fontSize:'10px',fontWeight:700,color:'var(--teal-dark)',background:'var(--teal-pale)',borderRadius:'20px',padding:'3px 10px'}}>↔ Bidirectional</div>
             </div>
           </div>
-          {activeTab === 'transcript' && (
-            <div style={{padding:'12px',borderBottom:'1px solid var(--border)',background:'var(--white)',display:'flex',gap:'8px',flexWrap:'wrap'}}>
-              {clinicalEntries.map((entry, index) => {
-                const quote = entry.segments?.[0]?.quote || '';
-                const active = hoveredQuote === quote;
-                return <button key={index} onMouseEnter={() => quote && setHoveredQuote(quote)} onMouseLeave={() => setHoveredQuote(null)} style={{border:active ? '1px solid var(--teal)' : '1px solid var(--border)',background:active ? 'var(--teal-pale)' : 'var(--surface)',borderRadius:'8px',padding:'7px 10px',cursor:'pointer',fontSize:'11px',color:'var(--navy)',textAlign:'left'}}>{entry.tooth} · {entry.label}</button>;
-              })}
-            </div>
-          )}
           <div style={{padding:'7px 12px',fontSize:'10px',color:'var(--ink3)',background:'var(--teal-xpale)',borderBottom:'1px solid var(--border)',lineHeight:1.4}}>
-            Hover a clinical entry to highlight supporting sentences below · Hover supporting sentences to highlight clinical entries
+            Speaker-labelled transcript for this selected visit.
           </div>
           {diarizationStatus && diarizationStatus !== 'not_run' && (
             <div style={{
@@ -888,7 +879,7 @@ function ChartContent() {
                       {turn.speaker.toUpperCase()}
                     </span>
                   )}
-                  <span>{renderTranscriptWithHighlight(turn.text, hoveredQuote)}</span>
+                  <span>{turn.text}</span>
                 </div>
               ))}
             </div>
@@ -927,8 +918,6 @@ function splitTranscriptTurns(transcript: string): TranscriptTurn[] {
   }
   return turns;
 }
-
-function normaliseEvidence(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
 
 function renderTranscriptWithHighlight(transcript: string, hoveredQuote: string | null) {
   if (!hoveredQuote) return transcript;
