@@ -60,3 +60,23 @@ def validate_confirmed_procedure(procedure: dict[str, Any]) -> list[str]:
     if not item:
         return ["Select a valid CDT code."]
     return [f"{field.title()} is required for {item['code']}." for field in item["requires"] if not procedure.get(field)]
+
+def procedure_key(procedure: dict[str, Any]) -> tuple[str, str, str, str]:
+    """One procedure per code and clinical location within a visit."""
+    return (
+        str(procedure.get("code") or ""),
+        str(procedure.get("tooth") or ""),
+        str(procedure.get("surface") or ""),
+        str(procedure.get("quadrant") or ""),
+    )
+
+
+def dedupe_confirmed_procedures(procedures: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str, str, str]] = set()
+    unique: list[dict[str, Any]] = []
+    for procedure in procedures:
+        key = procedure_key(procedure)
+        if key not in seen:
+            seen.add(key)
+            unique.append(procedure)
+    return unique

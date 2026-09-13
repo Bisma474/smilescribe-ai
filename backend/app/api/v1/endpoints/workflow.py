@@ -4,7 +4,7 @@ from app.core.dependencies import get_db, get_current_active_user
 from app.models.patient import Patient
 from app.models.session import ClinicalSession
 from app.models.user import User
-from app.services.coding_service import search_catalog, validate_confirmed_procedure
+from app.services.coding_service import dedupe_confirmed_procedures, search_catalog, validate_confirmed_procedure
 from app.services.ai_note_service import generate_visit_note
 from app.services.follow_up_service import build_follow_up_draft
 from app.services.risk_flag_service import derive_risk_flags
@@ -43,6 +43,7 @@ def review_queue(status: str = Query(default="needs_review"), q: str = Query(def
 @router.put("/session/{session_id}/confirmed-procedures")
 def save_confirmed_procedures(session_id: int, procedures: list[dict], db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     session = _owned_session(db, session_id, current_user)
+    procedures = dedupe_confirmed_procedures(procedures)
     errors = [error for procedure in procedures for error in validate_confirmed_procedure(procedure)]
     if errors:
         raise HTTPException(422, {"errors": errors})

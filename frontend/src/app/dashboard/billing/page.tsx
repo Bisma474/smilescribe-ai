@@ -159,7 +159,31 @@ function BillingContent() {
     }
   };
 
-  const addCommonProcedure = async (procedure: any) => { if (!sessionId) return; const next = [...confirmedProcedures, procedure]; setCodingSaving(true); try { const updated = await workflowApi.saveConfirmedProcedures(sessionId, next); setConfirmedProcedures(updated.clinician_confirmed_procedures || next); setToastMessage('Completed procedure added to this visit.'); } finally { setCodingSaving(false); } };
+  const addCommonProcedure = async (procedure: any) => {
+    if (!sessionId) return;
+    if (confirmedProcedures.some(item => item.code === procedure.code && !item.tooth && !item.quadrant)) {
+      setToastMessage(`${procedure.code} is already selected for this visit.`);
+      return;
+    }
+    const next = [...confirmedProcedures, procedure];
+    setCodingSaving(true);
+    try {
+      const updated = await workflowApi.saveConfirmedProcedures(sessionId, next);
+      setConfirmedProcedures(updated.clinician_confirmed_procedures || next);
+      setToastMessage('Completed procedure added to this visit.');
+    } finally { setCodingSaving(false); }
+  };
+
+  const removeConfirmedProcedure = async (index: number) => {
+    if (!sessionId) return;
+    const next = confirmedProcedures.filter((_, itemIndex) => itemIndex !== index);
+    setCodingSaving(true);
+    try {
+      const updated = await workflowApi.saveConfirmedProcedures(sessionId, next);
+      setConfirmedProcedures(updated.clinician_confirmed_procedures || next);
+      setToastMessage('Completed procedure removed from this visit.');
+    } finally { setCodingSaving(false); }
+  };
 
   const handleSubmitClaim = async () => {
     try {
@@ -327,7 +351,7 @@ function BillingContent() {
               <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
                 {[['D0150','Comprehensive exam',85],['D0120','Periodic exam',65],['D0140','Problem-focused exam',75],['D0180','Comprehensive periodontal evaluation',120],['D1110','Prophylaxis',95],['D0274','Bitewing x-rays',65],['D0210','Full-mouth x-rays',150],['D0330','Panoramic x-ray',110],['D1206','Fluoride varnish',48],['D1330','Oral hygiene instruction',29]].map(([code,desc,fee]) => <button key={String(code)} className="btn-sm btn-ghost" disabled={codingSaving} onClick={() => addCommonProcedure({code,description:desc,fee,status:'confirmed'})}>{desc}</button>)}
               </div>
-              {confirmedProcedures.length > 0 && <div style={{marginTop:'12px',fontSize:'12px',color:'var(--teal-dark)'}}>{confirmedProcedures.map(item => item.code + ' · ' + item.description).join('  |  ')}</div>}
+              {confirmedProcedures.length > 0 && <div style={{marginTop:'12px',display:'flex',gap:'6px',flexWrap:'wrap'}}>{confirmedProcedures.map((item, index) => <button key={item.code + '-' + index} className="btn-sm btn-ghost" disabled={codingSaving} onClick={() => removeConfirmedProcedure(index)}>{item.code} · {item.description} ×</button>)}</div>}
             </div>
             {/* CDT table */}
             <div style={{border:'1px solid var(--border)',borderRadius:'8px',overflow:'hidden',background:'var(--white)'}}>
