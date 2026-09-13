@@ -215,6 +215,8 @@ export const sessionsApi = {
   // for when the auto-detected speaker order guessed wrong. Only valid
   // once diarization_status is "success" (there's a labeled transcript
   // to swap).
+  generateAiNote: (sessionId: number) =>
+    request<ClinicalSession>('/workflow/session/' + sessionId + '/generate-ai-note', { method: 'POST' }),
   swapSpeakers: (sessionId: number) =>
     request<ClinicalSession>(`/transcription/session/${sessionId}/swap-speakers`, { method: 'PATCH' }),
 };
