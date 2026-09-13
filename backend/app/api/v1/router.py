@@ -9,8 +9,8 @@ api_router = APIRouter()
 def _try_include(module_name: str, prefix: str, tags: list) -> None:
     """Import an endpoint module and include its router; skip on ImportError.
 
-    POC mode intentionally excludes DB / auth modules so the app can run
-    without a live Supabase connection.
+    Transcript Review mode intentionally excludes DB / auth modules so the
+    app can run without a live Supabase connection.
     """
     try:
         mod = __import__(f"app.api.v1.endpoints.{module_name}", fromlist=["router"])
@@ -19,7 +19,7 @@ def _try_include(module_name: str, prefix: str, tags: list) -> None:
     except ImportError as exc:
         logger.warning(
             "Skipping endpoint module '%s' (missing dependency: %s). "
-            "POC endpoints will still work.",
+            "Transcript Review endpoints will still work.",
             module_name,
             exc.name or exc,
         )
@@ -27,8 +27,8 @@ def _try_include(module_name: str, prefix: str, tags: list) -> None:
         logger.warning("Skipping endpoint module '%s' (error: %s)", module_name, exc)
 
 
-# POC endpoints — always loaded
-_try_include("poc", prefix="/poc", tags=["POC"])
+# Transcript Review endpoints — always loaded
+_try_include("review", prefix="/review", tags=["Review"])
 
 # Auth / DB-backed endpoints — only loaded if their deps are present
 _try_include("auth", prefix="/auth", tags=["Auth"])

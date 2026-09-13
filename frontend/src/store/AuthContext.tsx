@@ -1,12 +1,15 @@
 'use client';
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import { authApi, UserOut } from '@/lib/apiClient';
+import { supabase } from '@/lib/supabase';
 
 interface AuthContextValue {
   user: UserOut | null;
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
+  completeGoogleLogin: () => Promise<void>;
   logout: () => Promise<void>;
   register: (email: string, password: string, full_name: string, practice_name?: string) => Promise<void>;
   updateProfile: (full_name: string, practice_name: string, license_number?: string) => Promise<void>;
@@ -38,10 +41,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(me);
   }, []);
 
+  // Kicks off the Supabase Google OAuth redirect — the browser navigates
+  // away to Google, then back to /auth/callback once Google (via
+  // Supabase) hands back a session. Nothing to await here beyond the
+  // redirect itself starting; completeGoogleLogin (below) is what
+  // finishes the login once we're back.
+  const loginWithGoogle = useCallback(async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    });
+    if (error) throw new Error(error.message);
+  }, []);
+
+  // Called from the /auth/callback page once Supabase has processed the
+  // Google redirect and established a Supabase session client-side. The
+  // backend accepts any valid Supabase-issued access token regardless of
+  // how the user authenticated (password or Google), so this just copies
+  // that session's tokens into the same localStorage keys the
+  // password-login flow uses, then hydrates the profile exactly like
+  // login() does — self-healing a local profile row on first Google
+  // sign-in (see backend get_or_create_profile).
+  const completeGoogleLogin = useCallback(async () => {
+    const { data, error } = await supabase.auth.getSession();
+    if (error || !data.session) {
+      throw new Error(error?.message || 'Google sign-in did not complete — no session was returned.');
+    }
+    localStorage.setItem('access_token', data.session.access_token);
+    localStorage.setItem('refresh_token', data.session.refresh_token);
+    const me = await authApi.me();
+    setUser(me);
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await authApi.logout();
     } catch { /* ignore — tokens are discarded client-side regardless */ }
+    // Also clear the Supabase client's own session (relevant for Google
+    // sign-ins, which supabase-js persists in its own storage key
+    // separately from the access_token/refresh_token pair above).
+    try {
+      await supabase.auth.signOut();
+    } catch { /* ignore — same reasoning as above */ }
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
     setUser(null);
@@ -69,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, isAuthenticated: !!user, login, logout, register, updateProfile }}>
+    <AuthContext.Provider value={{ user, isLoading, isAuthenticated: !!user, login, loginWithGoogle, completeGoogleLogin, logout, register, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );

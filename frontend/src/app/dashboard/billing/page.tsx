@@ -288,7 +288,11 @@ export default function BillingPage() {
               <div>Code</div><div>Description</div><div>Confidence</div><div style={{textAlign:'right'}}>Fee</div>
             </div>
             
-            {cdtList.map((c,i) => (
+            {cdtList.length === 0 ? (
+              <div style={{padding:'18px 16px',fontSize:'12.5px',color:'var(--ink2)',lineHeight:1.55}}>
+                No billable procedure suggestions were identified for this visit. Clinical findings are available in Chart Review and require clinician coding and confirmation before billing.
+              </div>
+            ) : cdtList.map((c,i) => (
               <div key={`${c.code}-${i}`} style={{
                 display:'grid',
                 gridTemplateColumns:'80px 1fr 100px 60px',
@@ -317,9 +321,9 @@ export default function BillingPage() {
         </div>
 
         <div>
-          {cdtList.length === 0 && (
+          {cdtList.length === 0 && unmatchedFindingsCount > 0 && (
             <div style={{fontSize:'12px',color:'var(--ink3)',fontStyle:'italic',padding:'12px 0'}}>
-              No AI-suggested CDT codes for this visit yet — record a session to generate findings, or add codes manually below.
+              {unmatchedFindingsCount} finding{unmatchedFindingsCount === 1 ? '' : 's'} need clinician coding before this visit can be billed.
             </div>
           )}
 

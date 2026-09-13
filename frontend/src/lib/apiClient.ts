@@ -1,7 +1,7 @@
 // Central API client — reads token from localStorage and attaches to every request
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
   // FormData bodies (file uploads) must NOT get an explicit Content-Type —
   // the browser sets one with the correct multipart boundary itself.
@@ -142,6 +142,15 @@ export interface ClinicalSession {
   patient_id: number;
   status: string;
   transcript?: string;
+  // How speaker labeling turned out for this session's transcript:
+  //   "success"     - transcript has "Dentist:"/"Patient:" speaker labels
+  //   "unavailable" - diarization was skipped or found only one speaker
+  //   "failed"      - diarization was attempted but errored out
+  //   "not_run"     - the recording pipeline hasn't reached this step yet
+  diarization_status?: 'success' | 'ai_assigned' | 'unavailable' | 'failed' | 'not_run';
+  // Whether the clinician has flipped the Dentist/Patient labels because
+  // the auto-detected order guessed wrong for this recording.
+  speakers_swapped?: boolean;
   perio_data?: any;
   clinical_entries?: any[];
   summary_report?: any;
@@ -201,6 +210,12 @@ export const sessionsApi = {
       body: formData,
     });
   },
+  // Flips the "Dentist:"/"Patient:" labels throughout the transcript —
+  // for when the auto-detected speaker order guessed wrong. Only valid
+  // once diarization_status is "success" (there's a labeled transcript
+  // to swap).
+  swapSpeakers: (sessionId: number) =>
+    request<ClinicalSession>(`/transcription/session/${sessionId}/swap-speakers`, { method: 'PATCH' }),
 };
 
 export const logsApi = {

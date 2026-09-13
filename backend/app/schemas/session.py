@@ -23,6 +23,8 @@ class ClinicalSessionUpdate(BaseModel):
 class ClinicalSessionOut(ClinicalSessionBase):
     id: int
     error_message: str | None = None
+    diarization_status: str = "not_run"  # success | ai_assigned | unavailable | failed | not_run
+    speakers_swapped: bool = False
     created_at: datetime
 
     class Config:

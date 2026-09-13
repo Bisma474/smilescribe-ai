@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { patientsApi, sessionsApi, logsApi, type Patient } from '@/lib/apiClient';
+import { patientsApi, sessionsApi, logsApi, type Patient, type ClinicalSession } from '@/lib/apiClient';
 import { patientName as formatPatientName, patientMeta as formatPatientMeta } from '@/lib/patientDisplay';
 import { useAuth } from '@/store/AuthContext';
 
@@ -96,6 +96,9 @@ export default function ChartPage() {
   const [summaryReport, setSummaryReport] = useState<SummaryReport | null>(null);
   const [hoveredQuote, setHoveredQuote] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [diarizationStatus, setDiarizationStatus] = useState<ClinicalSession['diarization_status']>('not_run');
+  const [speakersSwapped, setSpeakersSwapped] = useState(false);
+  const [swapping, setSwapping] = useState(false);
 
   useEffect(() => {
     // Read patientId from URL parameters safely in browser
@@ -166,6 +169,8 @@ export default function ChartPage() {
         setTranscript(session.transcript || '');
         setClinicalEntries((session.clinical_entries as ClinicalEntry[]) || []);
         setSummaryReport((session.summary_report as SummaryReport) || null);
+        setDiarizationStatus(session.diarization_status || 'not_run');
+        setSpeakersSwapped(!!session.speakers_swapped);
 
         if (session.status === 'error') {
           setError(session.error_message || 'The last recording failed to process.');
@@ -207,6 +212,20 @@ export default function ChartPage() {
     } catch (err) {
       console.error('Failed to auto-save:', err);
       setSaveStatus('error');
+    }
+  };
+
+  const handleSwapSpeakers = async () => {
+    if (!sessionId || swapping) return;
+    try {
+      setSwapping(true);
+      const updated = await sessionsApi.swapSpeakers(sessionId);
+      setTranscript(updated.transcript || '');
+      setSpeakersSwapped(!!updated.speakers_swapped);
+    } catch (err) {
+      console.error('Failed to swap speaker labels:', err);
+    } finally {
+      setSwapping(false);
     }
   };
 
@@ -825,11 +844,43 @@ export default function ChartPage() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
               Transcript · Evidence View
             </div>
-            <div style={{fontSize:'10px',fontWeight:700,color:'var(--teal-dark)',background:'var(--teal-pale)',borderRadius:'20px',padding:'3px 10px'}}>↔ Bidirectional</div>
+            <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+              {(diarizationStatus === 'success' || diarizationStatus === 'ai_assigned') && (
+                <button
+                  onClick={handleSwapSpeakers}
+                  disabled={swapping}
+                  title="Flip the Dentist/Patient labels if speaker detection guessed wrong"
+                  style={{fontSize:'10px',fontWeight:700,color:'var(--navy)',background:'var(--white)',border:'1px solid var(--border)',borderRadius:'20px',padding:'3px 10px',cursor:swapping?'default':'pointer',opacity:swapping?0.6:1}}
+                >
+                  ⇄ {swapping ? 'Swapping…' : 'Swap speakers'}
+                </button>
+              )}
+              <div style={{fontSize:'10px',fontWeight:700,color:'var(--teal-dark)',background:'var(--teal-pale)',borderRadius:'20px',padding:'3px 10px'}}>↔ Bidirectional</div>
+            </div>
           </div>
           <div style={{padding:'7px 12px',fontSize:'10px',color:'var(--ink3)',background:'var(--teal-xpale)',borderBottom:'1px solid var(--border)',lineHeight:1.4}}>
             Hover a clinical entry to highlight supporting sentences below · Hover supporting sentences to highlight clinical entries
           </div>
+          {diarizationStatus && diarizationStatus !== 'not_run' && (
+            <div style={{
+              padding:'6px 12px',fontSize:'10px',lineHeight:1.4,borderBottom:'1px solid var(--border)',
+              color: diarizationStatus === 'success' ? 'var(--teal-dark)' : diarizationStatus === 'failed' ? 'var(--red-c)' : 'var(--ink3)',
+              background: diarizationStatus === 'success' ? 'var(--teal-xpale)' : 'var(--white)',
+            }}>
+              {diarizationStatus === 'success' && (
+                <>Speaker labels auto-detected — verify Dentist/Patient are correct{speakersSwapped ? ' (swapped by you)' : ''}, and use "Swap speakers" to fix if reversed.</>
+              )}
+              {diarizationStatus === 'ai_assigned' && (
+                <>Speaker labels were inferred from the transcript text. Review them before relying on speaker identity.</>
+              )}
+              {diarizationStatus === 'unavailable' && (
+                <>Speaker labels unavailable for this recording (single speaker detected, or diarization isn't configured) — showing the plain transcript.</>
+              )}
+              {diarizationStatus === 'failed' && (
+                <>Speaker detection failed for this recording — showing the plain transcript without speaker labels.</>
+              )}
+            </div>
+          )}
           <div style={{flex:1,overflowY:'auto',padding:'8px 0',maxHeight:'400px'}}>
             {!transcript ? (
               <div style={{padding:'24px 16px',textAlign:'center',fontSize:'12px',color:'var(--ink3)'}}>
@@ -837,7 +888,16 @@ export default function ChartPage() {
               </div>
             ) : (
               <div style={{padding:'8px 16px',fontSize:'12.5px',color:'var(--ink)',lineHeight:1.7}}>
-                {renderTranscriptWithHighlight(transcript, hoveredQuote)}
+                {splitTranscriptTurns(transcript).map((turn, index, turns) => (
+                  <div key={turn.speaker + '-' + index} style={{padding:'8px 0',borderBottom:index === turns.length - 1 ? 'none' : '1px solid rgba(27,58,107,0.08)'}}>
+                    {turn.speaker && (
+                      <span style={{display:'inline-block',minWidth:'62px',marginRight:'8px',fontSize:'10px',fontWeight:800,letterSpacing:'0.06em',color:turn.speaker === 'Dentist' ? 'var(--teal-dark)' : 'var(--navy-mid)'}}>
+                        {turn.speaker.toUpperCase()}
+                      </span>
+                    )}
+                    <span>{renderTranscriptWithHighlight(turn.text, hoveredQuote)}</span>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -847,6 +907,29 @@ export default function ChartPage() {
   );
 }
 
+type TranscriptTurn = { speaker: 'Dentist' | 'Patient' | null; text: string };
+
+// Keeps stored transcript text unchanged, but presents every labelled turn on
+// its own row. This also repairs old transcripts where speaker labels were
+// accidentally emitted on the same physical line.
+function splitTranscriptTurns(transcript: string): TranscriptTurn[] {
+  const label = /(?:^|\n|\s)(Dentist|Patient):\s*/gi;
+  const matches = Array.from(transcript.matchAll(label));
+  if (matches.length === 0) return [{ speaker: null, text: transcript.trim() }].filter(turn => turn.text);
+
+  const turns: TranscriptTurn[] = [];
+  const prefix = transcript.slice(0, matches[0].index).trim();
+  if (prefix) turns.push({ speaker: null, text: prefix });
+
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index];
+    const start = (match.index || 0) + match[0].length;
+    const end = index + 1 < matches.length ? (matches[index + 1].index || transcript.length) : transcript.length;
+    const text = transcript.slice(start, end).trim();
+    if (text) turns.push({ speaker: match[1].toLowerCase() === 'dentist' ? 'Dentist' : 'Patient', text });
+  }
+  return turns;
+}
 // Splits the transcript around the currently-hovered clinical entry's
 // verbatim quote (if it appears) and wraps that span so hovering a
 // clinical entry visually points back to the exact evidence sentence.

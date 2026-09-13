@@ -87,14 +87,18 @@ def _decode_to_waveform(audio_path: str, sample_rate: int = 16000):
     import numpy as np
     import torch
 
-    proc = subprocess.run(
-        [
-            "ffmpeg", "-v", "error", "-i", audio_path,
-            "-f", "f32le", "-ac", "1", "-ar", str(sample_rate), "-",
-        ],
-        capture_output=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [
+                "ffmpeg", "-v", "error", "-i", audio_path,
+                "-f", "f32le", "-ac", "1", "-ar", str(sample_rate), "-",
+            ],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise DiarizationUnavailable("ffmpeg timed out decoding audio for diarization") from e
     if proc.returncode != 0 or not proc.stdout:
         raise DiarizationUnavailable(
             f"ffmpeg failed to decode audio for diarization: {proc.stderr.decode(errors='replace')[:500]}"
@@ -113,9 +117,32 @@ def diarize_audio(audio_path: str) -> list[dict]:
     pipeline = _load_pipeline()
     audio_input = _decode_to_waveform(audio_path)
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=UserWarning)
-        result = pipeline(audio_input)
+    # Run with a hard wall-clock timeout — a hung or unexpectedly slow CPU
+    # inference call here must not be able to leave the whole recording
+    # stuck at "processing" forever with nothing saved. Live-tested: this
+    # DID happen (see session_pipeline.py's commit history) before the
+    # transcript-persisted-before-diarization ordering fix; this timeout
+    # is the second, independent guard against the same failure mode.
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+
+    def _run():
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=UserWarning)
+            return pipeline(audio_input)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_run)
+        try:
+            result = future.result(timeout=120)
+        except FutureTimeoutError as e:
+            # The underlying thread keeps running to completion in the
+            # background (Python can't forcibly kill a thread) and its
+            # result is simply discarded — acceptable: it's daemon-less
+            # but bounded CPU work, not a resource leak that compounds.
+            raise DiarizationUnavailable(
+                "Diarization exceeded the 120s timeout — audio may be unusually long, "
+                "or the CPU is under heavy load."
+            ) from e
 
     # pyannote.audio 4.x wraps the result in a DiarizeOutput dataclass
     # (speaker_diarization / exclusive_speaker_diarization / speaker
@@ -131,7 +158,61 @@ def diarize_audio(audio_path: str) -> list[dict]:
     return turns
 
 
-def merge_with_transcript(turns: list[dict], words: list[dict]) -> str:
+MIN_TURN_DURATION = 0.35  # seconds — shorter turns are almost always a
+# pyannote misfire (a cough, a breath, cross-talk bleed) rather than a
+# genuine third speaker, and left unfiltered they cause the merged
+# transcript to flip speaker line-by-line for single words.
+
+
+def _smooth_turns(turns: list[dict]) -> list[dict]:
+    """Clean up raw diarization turns before they're used to label words:
+
+    1. Drop turns shorter than MIN_TURN_DURATION by reassigning them to
+       whichever neighboring turn they're closest to in time, instead of
+       letting them stand as their own (often spurious) speaker turn.
+    2. Merge consecutive turns left with the same speaker (which step 1
+       often produces, and which also happens natively when pyannote
+       emits back-to-back turns for one speaker with only a tiny gap).
+
+    Without this, a normal conversation produces dozens of sub-second
+    turns from breath noise/cross-talk, and the merged transcript reads
+    as "Dentist: Good Patient: morning Dentist: how are you..." instead
+    of one coherent line per speaker turn.
+    """
+    if not turns:
+        return []
+
+    ordered = sorted(turns, key=lambda t: t["start"])
+
+    # Pass 1: reassign turns under the minimum duration to the nearer
+    # neighbor's speaker, unless every turn is that short (a very short
+    # clip) — in which case there's nothing sensible to reassign to.
+    if any((t["end"] - t["start"]) >= MIN_TURN_DURATION for t in ordered):
+        for i, t in enumerate(ordered):
+            if (t["end"] - t["start"]) >= MIN_TURN_DURATION:
+                continue
+            prev_t = ordered[i - 1] if i > 0 else None
+            next_t = ordered[i + 1] if i + 1 < len(ordered) else None
+            if prev_t and next_t:
+                dist_prev = t["start"] - prev_t["end"]
+                dist_next = next_t["start"] - t["end"]
+                t["speaker"] = prev_t["speaker"] if dist_prev <= dist_next else next_t["speaker"]
+            elif prev_t:
+                t["speaker"] = prev_t["speaker"]
+            elif next_t:
+                t["speaker"] = next_t["speaker"]
+
+    # Pass 2: merge consecutive same-speaker turns into one.
+    merged: list[dict] = []
+    for t in ordered:
+        if merged and merged[-1]["speaker"] == t["speaker"]:
+            merged[-1]["end"] = max(merged[-1]["end"], t["end"])
+        else:
+            merged.append(dict(t))
+    return merged
+
+
+def merge_with_transcript(turns: list[dict], words: list[dict]) -> tuple[str, int]:
     """Combine diarization speaker turns with the ASR service's word-level
     timestamps into a speaker-labeled transcript, e.g.:
 
@@ -143,17 +224,75 @@ def merge_with_transcript(turns: list[dict], words: list[dict]) -> str:
     pyannote turns rarely cover every millisecond exactly). Consecutive
     words from the same speaker are grouped into one line.
 
-    If turns or words is empty, returns "" so the caller can fall back to
-    the plain (non-diarized) transcript instead of losing text entirely.
+    Turns are smoothed first (see _smooth_turns) to avoid the merged
+    transcript flipping speaker on every short misfire. Only the two
+    speakers who account for the most total speaking time are mapped to
+    Dentist/Patient (first of those two to speak = Dentist, per the
+    module docstring's heuristic); any additional distinct voice
+    pyannote detects (a hygienist, an assistant, background talk) is
+    folded into whichever of the two main speakers its turns sit closest
+    to in time, rather than leaking a raw "Speaker 3" label into the
+    transcript the clinician reads.
+
+    Returns (transcript, speaker_count) — speaker_count is how many
+    distinct voices pyannote actually detected (before folding minor
+    speakers into the main two), so the caller can tell "only one
+    speaker recorded" (diarization not meaningful) apart from "we
+    labeled two speakers."
+
+    If turns or words is empty, returns ("", 0) so the caller can fall
+    back to the plain (non-diarized) transcript instead of losing text
+    entirely.
     """
     if not turns or not words:
-        return ""
+        return "", 0
+
+    smoothed = _smooth_turns(turns)
+    distinct_speakers = {t["speaker"] for t in smoothed}
+    speaker_count = len(distinct_speakers)
+
+    if speaker_count < 2:
+        # Nothing to diarize — one voice for the whole recording (or the
+        # smoothing pass collapsed everything into one). Labeling a
+        # single speaker as "Dentist" throughout would be a guess with
+        # zero evidence behind it, so the caller should treat this as
+        # "diarization not meaningful" and keep the plain transcript.
+        return "", speaker_count
+
+    # Rank speakers by total speaking time; the two who talk the most are
+    # treated as Dentist/Patient. Any further distinct voice is a minor
+    # speaker to be folded into the nearer of those two.
+    duration_by_speaker: dict[str, float] = {}
+    for t in smoothed:
+        duration_by_speaker[t["speaker"]] = duration_by_speaker.get(t["speaker"], 0.0) + (t["end"] - t["start"])
+    main_speakers = {s for s, _ in sorted(duration_by_speaker.items(), key=lambda kv: kv[1], reverse=True)[:2]}
+
+    def nearest_main_speaker(turn: dict) -> str:
+        others = [t for t in smoothed if t["speaker"] in main_speakers]
+        closest = min(others, key=lambda o: min(abs(o["start"] - turn["start"]), abs(o["end"] - turn["end"])))
+        return closest["speaker"]
+
+    for t in smoothed:
+        if t["speaker"] not in main_speakers:
+            t["speaker"] = nearest_main_speaker(t)
+
+    # Re-merge now that minor speakers have been folded in — adjacent
+    # turns may have become same-speaker again.
+    final_turns: list[dict] = []
+    for t in smoothed:
+        if final_turns and final_turns[-1]["speaker"] == t["speaker"]:
+            final_turns[-1]["end"] = max(final_turns[-1]["end"], t["end"])
+        else:
+            final_turns.append(dict(t))
 
     label_map = settings.SPEAKER_LABEL_MAP
     # Speakers in order of first appearance — the first to speak is
     # assumed the dentist (see module docstring for why this is a
-    # heuristic, not a guarantee).
-    speaker_order = sorted({t["speaker"] for t in turns}, key=lambda s: min(t["start"] for t in turns if t["speaker"] == s))
+    # heuristic, not a guarantee). Swappable client-side via
+    # PATCH /session/{id}/swap-speakers if this guessed wrong.
+    speaker_order = sorted(
+        main_speakers, key=lambda s: min(t["start"] for t in final_turns if t["speaker"] == s)
+    )
     ordered_raw_labels = sorted(label_map.keys())  # e.g. ["SPEAKER_00", "SPEAKER_01"]
 
     def resolve_label(raw_speaker: str) -> str:
@@ -161,19 +300,17 @@ def merge_with_transcript(turns: list[dict], words: list[dict]) -> str:
             idx = speaker_order.index(raw_speaker)
         except ValueError:
             return raw_speaker
-        if idx < len(ordered_raw_labels):
-            return label_map.get(ordered_raw_labels[idx], raw_speaker)
-        return f"Speaker {idx + 1}"
+        return label_map.get(ordered_raw_labels[idx], raw_speaker)
 
     def speaker_for_time(t: float) -> str | None:
-        for turn in turns:
+        for turn in final_turns:
             if turn["start"] <= t <= turn["end"]:
                 return turn["speaker"]
         # Fall back to the closest turn if the timestamp falls in a small
         # gap between turns rather than dropping the word.
-        if not turns:
+        if not final_turns:
             return None
-        closest = min(turns, key=lambda turn: min(abs(turn["start"] - t), abs(turn["end"] - t)))
+        closest = min(final_turns, key=lambda turn: min(abs(turn["start"] - t), abs(turn["end"] - t)))
         return closest["speaker"]
 
     lines: list[str] = []
@@ -193,4 +330,4 @@ def merge_with_transcript(turns: list[dict], words: list[dict]) -> str:
     if current_words:
         lines.append(f"{resolve_label(current_speaker)}: {' '.join(current_words)}")
 
-    return "\n".join(lines)
+    return "\n".join(lines), speaker_count

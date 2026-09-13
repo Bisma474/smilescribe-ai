@@ -202,6 +202,53 @@ def get_session_by_id(
     return session
 
 
+@router.patch("/session/{session_id}/swap-speakers", response_model=ClinicalSessionOut)
+def swap_speakers(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Flip the "Dentist:"/"Patient:" labels throughout this session's
+    transcript. Diarization only guesses speaker identity positionally
+    (whoever talks first is assumed to be the dentist — see
+    diarization_service.py) and has no real way to verify that guess, so
+    the clinician needs a one-click way to correct it when it's wrong
+    rather than living with a mislabeled transcript. Toggles back and
+    forth (calling this twice restores the original labels) and tracks
+    speakers_swapped so the UI can show which state it's currently in."""
+    session = (
+        db.query(SessionModel)
+        .join(PatientModel, SessionModel.patient_id == PatientModel.id)
+        .filter(SessionModel.id == session_id, PatientModel.practice_id == current_user.id)
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.diarization_status not in {"success", "ai_assigned"} or not session.transcript:
+        raise HTTPException(status_code=400, detail="This session has no speaker-labeled transcript to swap.")
+
+    dentist_label = config.SPEAKER_LABEL_MAP.get("SPEAKER_00", "Dentist")
+    patient_label = config.SPEAKER_LABEL_MAP.get("SPEAKER_01", "Patient")
+
+    # Line-prefix swap only ("Label: ..." at the start of a line), not a
+    # blind string replace — avoids corrupting either label if it ever
+    # happens to appear inside the spoken content itself.
+    swapped_lines = []
+    for line in session.transcript.split("\n"):
+        if line.startswith(f"{dentist_label}: "):
+            swapped_lines.append(f"{patient_label}: " + line[len(dentist_label) + 2:])
+        elif line.startswith(f"{patient_label}: "):
+            swapped_lines.append(f"{dentist_label}: " + line[len(patient_label) + 2:])
+        else:
+            swapped_lines.append(line)
+
+    session.transcript = "\n".join(swapped_lines)
+    session.speakers_swapped = not session.speakers_swapped
+    db.commit()
+    db.refresh(session)
+    return session
+
+
 @router.post("/session", response_model=ClinicalSessionOut)
 def create_session(
     body: ClinicalSessionCreate,

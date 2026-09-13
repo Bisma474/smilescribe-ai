@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     # ── AI / Transcription ───────────────────────────────────────────────────
     GROQ_API_KEY: str = ""
 
-    # ML Pipeline Settings (kept for compatibility, not used by POC)
+    # ML Pipeline Settings (kept for compatibility, not used by Transcript Review)
     WHISPER_MODEL: str = "base"
     WHISPER_INITIAL_PROMPT: str = (
         "Dental clinical encounter. Terms include: tooth numbering Universal system, "
@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     )
     HF_TOKEN: str = ""
     PYANNOTE_MODEL: str = "pyannote/speaker-diarization-3.1"
+    # audio = pyannote first, then Groq text labels if needed;
+    # text = skip pyannote and use Groq text labels only; off = plain ASR.
+    SPEAKER_LABELING_MODE: str = "audio"
     SPEAKER_LABEL_MAP: dict = {
         "SPEAKER_00": "Dentist",
         "SPEAKER_01": "Patient",
