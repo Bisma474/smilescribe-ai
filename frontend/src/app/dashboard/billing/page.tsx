@@ -117,7 +117,8 @@ function BillingContent() {
           }));
         }
 
-        setAllFindingsList(mapped);
+        const uniqueMapped = mapped.filter((item, index, items) => items.findIndex(other => other.code === item.code && other.tooth === item.tooth && other.desc === item.desc) === index);
+        setAllFindingsList(uniqueMapped);
       } catch (err) {
         console.error('Failed to load billing data:', err);
         setError(err instanceof Error ? err.message : 'Failed to load billing data.');
@@ -342,7 +343,7 @@ function BillingContent() {
             <div className="stat-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:'20px'}}>
               <div className="stat-card"><div className="stat-val">{matchedCdtList.length}</div><div className="stat-lbl">CDT Codes</div></div>
               <div className="stat-card"><div className="stat-val warn">{unmatchedFindingsList.length}</div><div className="stat-lbl">Needs Coding</div></div>
-              <div className="stat-card"><div className="stat-val teal">{`$${totalFee}`}</div><div className="stat-lbl">Total Fee</div></div>
+              <div className="stat-card"><div className="stat-val teal">{`$${totalFee}`}</div><div className="stat-lbl">Confirmed Total</div></div>
             </div>
 
             <div className="card" style={{marginBottom:'16px'}}>
@@ -356,16 +357,17 @@ function BillingContent() {
             {/* CDT table */}
             <div style={{border:'1px solid var(--border)',borderRadius:'8px',overflow:'hidden',background:'var(--white)'}}>
               {/* Header row */}
-              <div style={{display:'grid',gridTemplateColumns:'100px 1fr 100px 80px',gap:'12px',padding:'12px 16px',fontWeight:700,color:'var(--ink3)',letterSpacing:'0.06em',textTransform:'uppercase',fontSize:'10px',borderBottom:'1px solid var(--border)'}}>
+              <div style={{display:'grid',gridTemplateColumns:'100px 1fr 100px 80px 120px',gap:'12px',padding:'12px 16px',fontWeight:700,color:'var(--ink3)',letterSpacing:'0.06em',textTransform:'uppercase',fontSize:'10px',borderBottom:'1px solid var(--border)'}}>
                 <div>Code</div>
                 <div>Description</div>
                 <div>Confidence</div>
                 <div style={{textAlign:'right'}}>Fee</div>
+                <div></div>
               </div>
 
               {/* Hint */}
               <div style={{fontSize:'12px',color:'var(--ink3)',padding:'8px 16px',fontStyle:'italic',borderBottom:'1px solid var(--border)'}}>
-                These CDT codes are AI suggestions — confirm before billing.
+                AI suggestions are not billed automatically. Add a completed service to include it in the confirmed total.
               </div>
 
               {allFindingsList.length === 0 ? (
@@ -376,7 +378,7 @@ function BillingContent() {
                 allFindingsList.map((c, i) => (
                   <div key={`${c.code || 'uncoded'}-${i}`} style={{
                     display:'grid',
-                    gridTemplateColumns:'100px 1fr 100px 80px',
+                    gridTemplateColumns:'100px 1fr 100px 80px 120px',
                     alignItems:'center',
                     gap:'12px',
                     padding:'12px 16px',
@@ -401,13 +403,16 @@ function BillingContent() {
                     <div style={{textAlign:'right',fontWeight:700,color: c.code ? 'var(--navy)' : 'var(--ink3)'}}>
                       {c.code ? `$${c.fee}` : '$0'}
                     </div>
+                    <div style={{textAlign:'right'}}>
+                      {c.code && <button className="btn-sm btn-ghost" disabled={codingSaving || confirmedProcedures.some(item => item.code === c.code && (item.tooth || '') === (c.tooth || ''))} onClick={() => addCommonProcedure({code:c.code,description:c.desc,fee:c.fee,tooth:c.tooth,status:'confirmed'})}>{confirmedProcedures.some(item => item.code === c.code && (item.tooth || '') === (c.tooth || '')) ? 'Added' : 'Add to bill'}</button>}
+                    </div>
                   </div>
                 ))
               )}
 
               {/* Subtotal */}
               <div style={{padding:'12px 16px',borderTop:'1px solid var(--border)',background:'var(--surface)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                <div style={{fontSize:'12px',fontWeight:700,color:'var(--navy)'}}>Subtotal (CDT Suggested)</div>
+                <div style={{fontSize:'12px',fontWeight:700,color:'var(--navy)'}}>Confirmed services total</div>
                 <div style={{fontFamily:'var(--font-display)',fontSize:'20px',color:'var(--teal-dark)',fontWeight:700}}>{`$${totalFee}`}</div>
               </div>
             </div>
