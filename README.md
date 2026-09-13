@@ -4,6 +4,14 @@ AI-powered dental transcription, real-time periodontal charting, and automated b
 
 ---
 
+## 🌐 Live Production Deployments
+
+- **Frontend (Vercel)**: [https://frontend-alpha-gold-14.vercel.app](https://frontend-alpha-gold-14.vercel.app)
+- **Backend API (Render)**: [https://smilescribe-ai.onrender.com/api/v1](https://smilescribe-ai.onrender.com/api/v1)
+- **API Swagger Documentation**: [https://smilescribe-ai.onrender.com/docs](https://smilescribe-ai.onrender.com/docs)
+
+---
+
 ## 🏗️ System Architecture
 
 The following diagram illustrates the end-to-end architecture of DentalScribeAI, including the relationship between the Next.js frontend client, the FastAPI backend services, the relational storage, and the external cloud API integrations.
@@ -102,17 +110,19 @@ flowchart TB
 4. **Interactive Dental Workspaces**:
    - **Perio Charting Editor**: Interactive Maxillary (Upper) and Mandibular (Lower) teeth arches for pockets depths (1mm - 10mm limits) and Bleeding on Probing (BOP) checkbox controls with real-time sync.
    - **Citation Workspace**: Split-panel workspace where hovering over extracted chart findings highlights the exact supporting sentence in the transcript, and vice versa.
-   - **Billing & CDT Codes**: Automatically maps findings to CDT codes (e.g. D1330, D4910), flags underbilled procedures, and allows editing code list and totals before insurance claims.
-5. **HIPAA Compliance & Security**: Built-in encrypted access audit logging tracking all credentials, profile changes, patient accesses, settings updates, and claims submissions.
+   - **Billing & Custom CDT Entry**: Automatically maps findings to CDT codes (e.g. D1330, D4910), allows adding custom procedure codes and fees manually, and dynamically computes confirmed bill totals.
+5. **Interactive Practice Settings**:
+   - Every sidebar section (`Recording`, `Chart & Coding`, `Billing`, `Practice Profile`, `HIPAA & Security`, `EMR Integration`) is active and interactive.
+6. **HIPAA Compliance & Security**: Built-in encrypted access audit logging tracking all credentials, profile changes, patient accesses, settings updates, and claims submissions.
 
 ---
 
 ## 🛠️ Tech Stack
 
-- **Frontend**: Next.js 16 (React 19), TypeScript, Vanilla CSS Design System.
-- **Backend**: FastAPI (Python), SQLAlchemy, PageIndex Python SDK, Groq Python SDK.
+- **Frontend**: Next.js 16 (React 19), TypeScript, Vanilla CSS Design System, Vercel.
+- **Backend**: FastAPI (Python), SQLAlchemy, PageIndex Python SDK, Groq Python SDK, Render.
 - **Database**: Supabase PostgreSQL.
-- **Testing**: Vitest (Frontend), Pytest (Backend).
+- **Testing**: Vitest (Frontend - 15 tests), Pytest (Backend - 62 tests).
 
 ---
 
@@ -131,7 +141,12 @@ DentalScribeAI/
 │   │   └── main.py          # App entrypoint & DB connection verified lifespan
 │   ├── tests/               # Pytest directories (unit, integration)
 │   ├── requirements.txt     # Python backend dependencies
-│   └── Dockerfile           # Backend container instructions
+│   └── render.yaml          # Render backend deployment config
+├── docs/                    # Project documentation & deployment guides
+│   ├── DEPLOY.md            # Step-by-step Vercel & Render deploy guide
+│   ├── COMMANDS.md          # Database setup commands
+│   ├── context.md           # Architecture overview
+│   └── implementation_plan.md
 ├── frontend/
 │   ├── src/
 │   │   ├── __tests__/       # Comprehensive Vitest suite (LoginPage, Dashboard, Chart, etc.)
@@ -140,11 +155,9 @@ DentalScribeAI/
 │   │   ├── lib/             # API client methods (authApi, patientsApi, logsApi)
 │   │   └── store/           # Global React Contexts (AuthContext)
 │   ├── package.json         # Scripts, React 19 dependencies, and Vitest setup
-│   ├── vitest.config.ts     # Vitest environment configurations (jsdom)
-│   └── Dockerfile           # Frontend container instructions
+│   └── vitest.config.ts     # Vitest environment configurations (jsdom)
 ├── supabase/
 │   └── full_migration.sql   # Database schemas, constraints, and initial seeds
-├── docker-compose.yml       # Docker orchestrator for development
 └── README.md
 ```
 
@@ -159,7 +172,7 @@ DentalScribeAI/
 
 ### 1. Database Setup (Supabase)
 1. Create a project on [Supabase](https://supabase.com/).
-2. Navigate to **SQL Editor** in your Supabase dashboard and run the contents of [supabase/full_migration.sql](file:///d:/DentalScribeAI/supabase/full_migration.sql) to set up tables (`users`, `patients`, `sessions`, `chart_entries`, `billing_codes`, `hipaa_audit_logs`) and populate the initial dental practice profile and patient database.
+2. Navigate to **SQL Editor** in your Supabase dashboard and run the contents of [supabase/full_migration.sql](file:///supabase/full_migration.sql) to set up tables (`users`, `patients`, `sessions`, `chart_entries`, `billing_codes`, `hipaa_audit_logs`) and populate the initial dental practice profile and patient database.
 
 ---
 
@@ -171,13 +184,9 @@ DentalScribeAI/
    ```
 2. Create and activate a virtual environment:
    ```bash
-   # Windows (Command Prompt)
+   # Windows (Powershell / Conda)
    python -m venv venv
    venv\Scripts\activate
-
-   # Windows (Powershell / Miniconda)
-   conda create -n dentalscribe python=3.10
-   conda activate dentalscribe
    ```
 3. Install dependencies:
    ```bash
@@ -209,12 +218,7 @@ DentalScribeAI/
    ```bash
    npm install
    ```
-3. Copy environment template and verify your API route:
-   ```bash
-   cp .env.local .env.local
-   ```
-   Ensure `NEXT_PUBLIC_API_URL` is pointing to your backend endpoint (default is `http://localhost:8000/api/v1`).
-4. Launch the frontend development server:
+3. Launch the frontend development server:
    ```bash
    npm run dev
    ```
@@ -224,29 +228,14 @@ DentalScribeAI/
 
 ## 🧪 Running Tests
 
-### Frontend (Vitest)
-A rigorous, stateful test suite validates user flows, forms, pocket limits, citation highlighting, billing code calculations, settings log modals, and global search.
-
-To execute the test suite:
+### Frontend (Vitest - 15 Tests)
 ```bash
 cd frontend
 npm run test
 ```
 
-### Production Build Verification
-To ensure all TypeScript typings and Next.js static pages optimize successfully:
+### Backend (Pytest - 62 Tests)
 ```bash
-cd frontend
-npm run build
+cd backend
+pytest
 ```
-
----
-
-## 🐳 Docker Deployment
-
-To build and run both the Next.js frontend and FastAPI backend inside a unified environment:
-```bash
-docker-compose up --build
-```
-- Frontend UI is accessible at [http://localhost:3000](http://localhost:3000)
-- Backend Swagger docs are accessible at [http://localhost:8000/docs](http://localhost:8000/docs)
