@@ -29,7 +29,7 @@ const generateDefaultPerioData = (): Record<number, ToothInfo> => {
   return initialData;
 };
 
-const TABS = ['Perio Chart', 'Clinical Entries', 'Summary', 'AI Visit Note'];
+const TABS = ['Perio Chart', 'Clinical Entries', 'Summary', 'AI Visit Note', 'Transcript Evidence'];
 
 interface ClinicalEntry {
   tooth: string;
@@ -65,7 +65,7 @@ function ChartContent() {
   const [loadingPatients, setLoadingPatients] = useState(false);
   const [patientsError, setPatientsError] = useState('');
 
-  const [activeTab, setActiveTab] = useState<'perio' | 'entries' | 'summary' | 'note'>('perio');
+  const [activeTab, setActiveTab] = useState<'perio' | 'entries' | 'summary' | 'note' | 'transcript'>('perio');
   const [selectedTooth, setSelectedTooth] = useState<number>(14);
 
   const [loading, setLoading] = useState(false);
@@ -373,7 +373,7 @@ function ChartContent() {
       {/* Tabs */}
       <div style={{display:'flex',gap:'4px',borderBottom:'1px solid var(--border)',marginBottom:'16px'}}>
         {TABS.map((t, idx) => {
-          const tabKey = idx === 0 ? 'perio' : idx === 1 ? 'entries' : idx === 2 ? 'summary' : 'note';
+          const tabKey = idx === 0 ? 'perio' : idx === 1 ? 'entries' : idx === 2 ? 'summary' : idx === 3 ? 'note' : 'transcript';
           const active = activeTab === tabKey;
           return (
             <button
@@ -399,7 +399,7 @@ function ChartContent() {
       </div>
 
       {/* Main Grid: Left Tab Content vs Right Transcript */}
-      <div style={{display:'grid',gridTemplateColumns:'1fr 400px',gap:'20px',alignItems:'start'}}>
+      <div style={{display:'grid',gridTemplateColumns:activeTab === 'transcript' ? '1fr' : '1fr 400px',gap:'20px',alignItems:'start'}}>
         <div>
           {/* TAB 1: PERIO CHART */}
           {activeTab === 'perio' && (
@@ -870,7 +870,7 @@ function ChartContent() {
               )}
             </div>
           )}
-          <div style={{flex:1,overflowY:'auto',padding:'8px 0',maxHeight:'400px'}}>
+          <div style={{flex:1,overflowY:'auto',padding:'8px 0',maxHeight:activeTab === 'transcript' ? 'calc(100vh - 290px)' : '400px'}}>
             <div style={{padding:'8px 16px',fontSize:'12.5px',color:'var(--ink)',lineHeight:1.7}}>
               {splitTranscriptTurns(transcript).map((turn, index, turns) => (
                 <div key={turn.speaker + '-' + index} style={{padding:'8px 0',borderBottom:index === turns.length - 1 ? 'none' : '1px solid rgba(27,58,107,0.08)'}}>
