@@ -19,18 +19,20 @@ class CdtMatch(TypedDict):
 
 
 _CDT_TABLE: list[tuple[list[str], CdtMatch]] = [
-    (["root canal", "endodontic"], {"code": "D3310", "description": "Root canal therapy", "fee": 900}),
-    (["extraction", "extract tooth", "pulled tooth"], {"code": "D7140", "description": "Extraction, erupted tooth", "fee": 200}),
-    (["crown prep", "needs a crown", "crown recommended", "crown placed", "crown seated"], {"code": "D2740", "description": "Crown — porcelain/ceramic", "fee": 1200}),
+    (["root canal", "endodontic", "pulpectomy"], {"code": "D3310", "description": "Root canal therapy", "fee": 900}),
+    (["extraction", "extract tooth", "pulled tooth", "remove tooth"], {"code": "D7140", "description": "Extraction, erupted tooth", "fee": 200}),
+    (["crown prep", "needs a crown", "crown recommended", "crown placed", "crown seated", "crown"], {"code": "D2740", "description": "Crown — porcelain/ceramic", "fee": 1200}),
     (["sealant"], {"code": "D1351", "description": "Sealant — per tooth", "fee": 55}),
     (["periodontal maintenance", "perio maintenance"], {"code": "D4910", "description": "Periodontal maintenance", "fee": 148}),
-    (["scaling and root planing", "root planing", "deep cleaning"], {"code": "D4341", "description": "Scaling & root planing, per quadrant", "fee": 180}),
+    (["scaling and root planing", "root planing", "deep cleaning", "pocketing", "periodontitis", "bone loss", "furcation"], {"code": "D4341", "description": "Scaling & root planing, per quadrant", "fee": 180}),
+    (["gingivitis", "gum inflammation", "inflammation", "bleeding on probing", "bleeding"], {"code": "D4346", "description": "Scaling in presence of gingival inflammation", "fee": 110}),
     (["calculus", "scaling", "prophylaxis", "cleaning"], {"code": "D1110", "description": "Prophylaxis — adult", "fee": 95}),
     (["fluoride"], {"code": "D1206", "description": "Topical fluoride varnish", "fee": 48}),
     (["oral hygiene instruction", "brushing technique", "ohi"], {"code": "D1330", "description": "Oral hygiene instruction", "fee": 29}),
-    (["caries", "cavity", "filling", "composite", "restoration"], {"code": "D2391", "description": "Resin-based composite restoration, one surface", "fee": 165}),
-    (["bitewing", "radiograph", "x-ray"], {"code": "D0274", "description": "Bitewing radiographs", "fee": 65}),
+    (["caries", "cavity", "filling", "composite", "restoration", "decay", "lesion"], {"code": "D2391", "description": "Resin-based composite restoration, one surface", "fee": 165}),
+    (["bitewing", "radiograph", "x-ray", "xray"], {"code": "D0274", "description": "Bitewing radiographs", "fee": 65}),
     (["exam", "evaluation", "check-up", "checkup"], {"code": "D0150", "description": "Comprehensive oral evaluation", "fee": 85}),
+    (["pain", "emergency", "sensitivity", "discomfort", "toothache"], {"code": "D0140", "description": "Limited oral evaluation — problem focused", "fee": 75}),
 ]
 
 _NEGATION_CUES = [

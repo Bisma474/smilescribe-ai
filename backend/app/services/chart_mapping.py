@@ -57,7 +57,7 @@ def map_findings_to_clinical_entries(findings: list[dict]) -> list[dict[str, Any
         # A transcript-supported finding is not itself proof that a procedure
         # was performed. Do not carry a code or fee forward when its evidence
         # failed validation; it must be reviewed and coded by the clinician.
-        cdt = match_cdt(finding_text, detail_text) if confidence > 0 else None
+        cdt = match_cdt(finding_text, detail_text)
         entries.append({
             "tooth": f"#{tooth}" if tooth not in ("", "ALL", "—") else tooth,
             "label": finding_text,
