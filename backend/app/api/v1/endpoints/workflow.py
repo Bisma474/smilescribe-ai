@@ -5,6 +5,7 @@ from app.models.patient import Patient
 from app.models.session import ClinicalSession
 from app.models.user import User
 from app.services.coding_service import search_catalog, validate_confirmed_procedure
+from app.services.ai_note_service import generate_visit_note
 
 router = APIRouter()
 
@@ -51,6 +52,14 @@ def save_ai_note(session_id: int, note: dict, db: Session = Depends(get_db), cur
     session = _owned_session(db, session_id, current_user)
     if not isinstance(note.get("sections", {}), dict):
         raise HTTPException(422, "AI note requires structured sections")
+    session.ai_note = note
+    db.commit()
+    db.refresh(session)
+    return session
+@router.post("/session/{session_id}/generate-ai-note")
+def generate_ai_note(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    session = _owned_session(db, session_id, current_user)
+    note = generate_visit_note(session.transcript or "", session.clinical_entries or [])
     session.ai_note = note
     db.commit()
     db.refresh(session)
