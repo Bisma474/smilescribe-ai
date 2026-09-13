@@ -64,3 +64,18 @@ def generate_ai_note(session_id: int, db: Session = Depends(get_db), current_use
     db.commit()
     db.refresh(session)
     return session
+@router.get("/review-tasks")
+def review_tasks(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    rows = db.query(ClinicalSession, Patient).join(Patient).filter(Patient.practice_id == current_user.id, ClinicalSession.status.in_(["complete", "submitted"])).order_by(ClinicalSession.created_at.desc()).all()
+    tasks = []
+    for session, patient in rows:
+        if session.status == "submitted":
+            continue
+        name = f"{patient.first_name} {patient.last_name}".strip()
+        if session.diarization_status in {"success", "ai_assigned"}:
+            tasks.append({"session_id": session.id, "patient_id": patient.id, "patient_name": name, "task": "Verify speaker labels", "action": "transcript"})
+        if (session.ai_note or {}).get("status") != "approved":
+            tasks.append({"session_id": session.id, "patient_id": patient.id, "patient_name": name, "task": "Review AI visit note", "action": "note"})
+        if not (session.clinician_confirmed_procedures or []):
+            tasks.append({"session_id": session.id, "patient_id": patient.id, "patient_name": name, "task": "Select completed procedures", "action": "billing"})
+    return tasks[:50]
