@@ -9,9 +9,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div style={{display:'flex',flexDirection:'column',minHeight:'100vh'}}>
+    <div style={{display:'flex',flexDirection:'column',height:'100vh',overflow:'hidden'}}>
       <TopBar onHamburger={() => setSidebarOpen(o => !o)} isOpen={sidebarOpen} />
-      <div style={{display:'flex',flex:1,overflow:'hidden'}}>
+      <div style={{display:'flex',flex:1,overflow:'hidden',position:'relative'}}>
         {sidebarOpen && (
           <div
             onClick={() => setSidebarOpen(false)}
@@ -19,13 +19,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           />
         )}
         <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-        <main style={{flex:1,overflowY:'auto',overflowX:'hidden',minWidth:0,paddingBottom:'70px'}}>
+        <main className="main-content-scroll" style={{flex:1,overflowY:'auto',overflowX:'hidden',minWidth:0,paddingBottom:'70px'}}>
           <div style={{padding:'24px 16px'}}>
             {children}
           </div>
         </main>
       </div>
       <BottomTab />
+      <style jsx global>{`
+        @media (min-width: 1024px) {
+          .main-content-scroll {
+            margin-left: var(--sidebar-w);
+          }
+        }
+      `}</style>
     </div>
   );
 }

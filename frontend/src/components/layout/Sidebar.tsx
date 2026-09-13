@@ -28,7 +28,7 @@ export default function Sidebar({ isOpen, onClose }: Props) {
       zIndex:90,overflowY:'auto',
     }}>
       <style>{`
-        @media(min-width:1024px){aside{transform:translateX(0)!important;position:sticky!important}}
+        @media(min-width:1024px){aside{transform:translateX(0)!important;position:fixed!important;top:var(--topbar-h)!important;bottom:0!important;height:calc(100vh - var(--topbar-h))!important}}
         .nav-item{display:flex;align-items:center;gap:12px;padding:10px 16px;cursor:pointer;border-radius:10px;margin:2px 8px;transition:background .15s,color .15s;color:rgba(255,255,255,0.65);font-size:13px;font-weight:500;text-decoration:none}
         .nav-item:hover{background:rgba(74,191,176,0.15);color:white}
         .nav-item.active{background:rgba(74,191,176,0.22);color:white}
