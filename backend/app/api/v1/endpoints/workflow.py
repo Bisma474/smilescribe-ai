@@ -6,6 +6,7 @@ from app.models.session import ClinicalSession
 from app.models.user import User
 from app.services.coding_service import search_catalog, validate_confirmed_procedure
 from app.services.ai_note_service import generate_visit_note
+from app.services.follow_up_service import build_follow_up_draft
 
 router = APIRouter()
 
@@ -79,3 +80,11 @@ def review_tasks(db: Session = Depends(get_db), current_user: User = Depends(get
         if not (session.clinician_confirmed_procedures or []):
             tasks.append({"session_id": session.id, "patient_id": patient.id, "patient_name": name, "task": "Select completed procedures", "action": "billing"})
     return tasks[:50]
+@router.post("/session/{session_id}/generate-follow-up")
+def generate_follow_up(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    session = _owned_session(db, session_id, current_user)
+    patient = db.query(Patient).filter(Patient.id == session.patient_id).first()
+    session.follow_up_draft = build_follow_up_draft(f"{patient.first_name} {patient.last_name}".strip(), session.treatment_opportunities or [])
+    db.commit()
+    db.refresh(session)
+    return session
