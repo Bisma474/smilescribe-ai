@@ -126,3 +126,18 @@ def generate_patient_summary(session_id: int, db: Session = Depends(get_db), cur
     db.commit()
     db.refresh(session)
     return session
+@router.get("/analytics")
+def practice_analytics(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    sessions = db.query(ClinicalSession).join(Patient).filter(Patient.practice_id == current_user.id, ClinicalSession.status.in_(["complete", "submitted"])).all()
+    submitted = [session for session in sessions if session.status == "submitted"]
+    notes_approved = [session for session in sessions if (session.ai_note or {}).get("status") == "approved"]
+    summaries_approved = [session for session in sessions if (session.patient_summary or {}).get("status") == "approved"]
+    procedures_confirmed = sum(len(session.clinician_confirmed_procedures or []) for session in sessions)
+    return {
+        "completed_visits": len(sessions),
+        "submitted_visits": len(submitted),
+        "approved_notes": len(notes_approved),
+        "approved_patient_summaries": len(summaries_approved),
+        "confirmed_procedures": procedures_confirmed,
+        "note_approval_rate": round((len(notes_approved) / len(sessions)) * 100) if sessions else 0,
+    }

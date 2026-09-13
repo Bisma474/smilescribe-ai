@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { patientsApi, workflowApi, type DashboardStats, type RecentSession } from '@/lib/apiClient';
+import { patientsApi, workflowApi, type DashboardStats, type RecentSession, type PracticeAnalytics } from '@/lib/apiClient';
 import { useAuth } from '@/store/AuthContext';
 
 function timeAgo(iso: string): string {
@@ -44,6 +44,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reviewTasks, setReviewTasks] = useState<any[]>([]);
+  const [analytics, setAnalytics] = useState<PracticeAnalytics | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -53,6 +54,7 @@ export default function DashboardPage() {
         const data = await patientsApi.dashboardStats();
         setStats(data);
         setReviewTasks(await workflowApi.reviewTasks());
+        setAnalytics(await workflowApi.analytics());
       } catch (err) {
         console.error('Failed to load dashboard stats:', err);
         setError(err instanceof Error ? err.message : 'Failed to load dashboard data.');
@@ -129,6 +131,18 @@ export default function DashboardPage() {
         </div>
       </div>
 
+
+      {!loading && analytics && (
+        <div className="card" style={{marginBottom:'20px'}}>
+          <div className="section-label mb-12">Practice analytics</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(130px, 1fr))',gap:'12px'}}>
+            <div><div className="stat-val">{analytics.completed_visits}</div><div className="stat-lbl">Completed visits</div></div>
+            <div><div className="stat-val">{analytics.submitted_visits}</div><div className="stat-lbl">Submitted visits</div></div>
+            <div><div className="stat-val teal">{analytics.confirmed_procedures}</div><div className="stat-lbl">Confirmed procedures</div></div>
+            <div><div className="stat-val">{analytics.note_approval_rate}%</div><div className="stat-lbl">Notes approved</div></div>
+          </div>
+        </div>
+      )}
       {reviewTasks.length > 0 && (
         <div className="card" style={{marginBottom:'20px'}}>
           <div className="section-label mb-12">Review tasks</div>
