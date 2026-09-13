@@ -151,10 +151,17 @@ def get_session(
 
     session = (
         db.query(SessionModel)
-        .filter(SessionModel.patient_id == patient_id)
+        .filter(SessionModel.patient_id == patient_id, SessionModel.status.in_(["complete", "submitted"]))
         .order_by(SessionModel.created_at.desc())
         .first()
     )
+    if not session:
+        session = (
+            db.query(SessionModel)
+            .filter(SessionModel.patient_id == patient_id)
+            .order_by(SessionModel.created_at.desc())
+            .first()
+        )
     if not session:
         session = SessionModel(patient_id=patient_id, status="new")
         db.add(session)
