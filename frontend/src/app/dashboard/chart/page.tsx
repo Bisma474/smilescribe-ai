@@ -81,6 +81,11 @@ function ChartContent() {
   const [auditTimeline, setAuditTimeline] = useState<AuditTimelineEvent[]>([]);
   const [patientSummary, setPatientSummary] = useState<any>({ status: 'draft', sections: {} });
   const [patientSummarySaving, setPatientSummarySaving] = useState(false);
+  const [medicationsAllergies, setMedicationsAllergies] = useState<any>({ medications: [], allergies: [] });
+  const [riskFlags, setRiskFlags] = useState<any[]>([]);
+  const [visitComparison, setVisitComparison] = useState<any>(null);
+  const [followUpDraft, setFollowUpDraft] = useState<any>({ status: 'draft', message: '' });
+  const [careToolsSaving, setCareToolsSaving] = useState(false);
   const [noteSaving, setNoteSaving] = useState(false);
   const [hoveredQuote, setHoveredQuote] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -150,6 +155,11 @@ function ChartContent() {
         setAiNote(session.ai_note || { status: 'draft', sections: { chief_complaint: '', findings: '', assessment: '', plan: '', instructions: '' } });
         setAuditTimeline(await workflowApi.timeline(session.id));
         setPatientSummary(session.patient_summary || { status: 'draft', sections: {} });
+        setMedicationsAllergies(session.medications_allergies || { medications: [], allergies: [] });
+        setFollowUpDraft(session.follow_up_draft || { status: 'draft', message: '' });
+        const [flags, comparison] = await Promise.all([workflowApi.riskFlags(session.id), workflowApi.comparison(session.id)]);
+        setRiskFlags(flags);
+        setVisitComparison(comparison);
         setDiarizationStatus(session.diarization_status || 'not_run');
         setSpeakersSwapped(!!session.speakers_swapped);
 
@@ -844,6 +854,19 @@ function ChartContent() {
               </div>
 
 
+              <div className="card" style={{padding:'18px',marginBottom:'16px'}}>
+                <div style={{fontSize:'15px',fontWeight:700,color:'var(--navy)',marginBottom:'10px'}}>Care tools</div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))',gap:'14px'}}>
+                  <div><div style={{fontSize:'11px',fontWeight:700,color:'var(--ink3)',textTransform:'uppercase'}}>Medications & allergies</div><div style={{fontSize:'12px',marginTop:'5px'}}><strong>Medications:</strong> {(medicationsAllergies.medications || []).join(', ') || 'None identified'}</div><div style={{fontSize:'12px',marginTop:'4px'}}><strong>Allergies:</strong> {(medicationsAllergies.allergies || []).join(', ') || 'None identified'}</div></div>
+                  <div><div style={{fontSize:'11px',fontWeight:700,color:'var(--ink3)',textTransform:'uppercase'}}>Risk flags</div>{riskFlags.length ? riskFlags.map((flag, index) => <div key={index} style={{fontSize:'12px',marginTop:'5px',color:'var(--red-dark, #A03030)'}}>{flag.label} · {flag.reason}</div>) : <div style={{fontSize:'12px',marginTop:'5px'}}>No review flags identified.</div>}</div>
+                  <div><div style={{fontSize:'11px',fontWeight:700,color:'var(--ink3)',textTransform:'uppercase'}}>Visit comparison</div><div style={{fontSize:'12px',marginTop:'5px'}}>{visitComparison?.previous_session_id ? `${visitComparison.new_findings?.length || 0} new and ${visitComparison.resolved_findings?.length || 0} resolved findings since the prior visit.` : 'No prior completed visit available.'}</div></div>
+                </div>
+                <div style={{marginTop:'14px',borderTop:'1px solid var(--border)',paddingTop:'12px'}}>
+                  <div style={{fontSize:'11px',fontWeight:700,color:'var(--ink3)',textTransform:'uppercase',marginBottom:'5px'}}>Appointment follow-up draft</div>
+                  <textarea className="form-input" value={followUpDraft.message || ''} onChange={e => setFollowUpDraft({...followUpDraft, status:'draft', message:e.target.value})} style={{width:'100%',minHeight:'58px'}} />
+                  <div style={{display:'flex',gap:'8px',marginTop:'8px'}}><button className="btn-sm btn-ghost" disabled={careToolsSaving || !sessionId} onClick={async () => { if (!sessionId) return; setCareToolsSaving(true); try { const updated = await workflowApi.generateFollowUp(sessionId); setFollowUpDraft(updated.follow_up_draft || followUpDraft); } finally { setCareToolsSaving(false); } }}>{careToolsSaving ? 'Generating...' : 'Generate follow-up'}</button><button className="btn-sm btn-ghost" disabled={careToolsSaving || !sessionId} onClick={async () => { if (!sessionId) return; setCareToolsSaving(true); try { await sessionsApi.update(sessionId, { follow_up_draft: {...followUpDraft, status:'draft'} }); } finally { setCareToolsSaving(false); } }}>Save draft</button></div>
+                </div>
+              </div>
               <div className="card" style={{padding:'18px',marginBottom:'16px'}}>
                 <div style={{fontSize:'15px',fontWeight:700,color:'var(--navy)',marginBottom:'6px'}}>Patient-friendly after-visit summary</div>
                 <div style={{fontSize:'12px',color:'var(--ink3)',marginBottom:'12px'}}>Plain-language draft. Review and approve it before sharing with the patient.</div>

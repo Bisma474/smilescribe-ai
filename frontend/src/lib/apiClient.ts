@@ -250,6 +250,9 @@ export const workflowApi = {
     request<AuditTimelineEvent[]>("/workflow/session/" + sessionId + "/timeline"),
   generatePatientSummary: (sessionId: number) =>
     request<ClinicalSession>("/workflow/session/" + sessionId + "/generate-patient-summary", { method: "POST" }),
+  generateFollowUp: (sessionId: number) => request<ClinicalSession>('/workflow/session/' + sessionId + '/generate-follow-up', { method: 'POST' }),
+  comparison: (sessionId: number) => request<any>('/workflow/session/' + sessionId + '/comparison'),
+  riskFlags: (sessionId: number) => request<any[]>('/workflow/session/' + sessionId + '/risk-flags'),
 };
 
 export const logsApi = {

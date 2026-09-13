@@ -56,6 +56,10 @@ def update_session(
         session.ai_note = body.ai_note
     if body.patient_summary is not None:
         session.patient_summary = body.patient_summary
+    if body.medications_allergies is not None:
+        session.medications_allergies = body.medications_allergies
+    if body.follow_up_draft is not None:
+        session.follow_up_draft = body.follow_up_draft
 
     db.commit()
     db.refresh(session)
