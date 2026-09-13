@@ -11,9 +11,14 @@ interface LogEntry {
   details: string;
 }
 
+type SettingsTab = 'recording' | 'chart' | 'billing' | 'profile' | 'hipaa' | 'emr';
+
 export default function SettingsPage() {
   const router = useRouter();
   const { logout, user, updateProfile } = useAuth();
+
+  // Active tab state
+  const [activeTab, setActiveTab] = useState<SettingsTab>('recording');
 
   // Settings states
   const [toothSystem, setToothSystem] = useState('Universal');
@@ -21,6 +26,11 @@ export default function SettingsPage() {
   const [autoStop, setAutoStop] = useState('30 sec');
   const [revenueAlerts, setRevenueAlerts] = useState(true);
   const [confidence, setConfidence] = useState(85);
+  const [feeSchedule, setFeeSchedule] = useState('Standard Practice Fees');
+  const [autoValidate, setAutoValidate] = useState(true);
+  const [emrProvider, setEmrProvider] = useState('Dentrix');
+  const [syncFreq, setSyncFreq] = useState('Real-time');
+  const [sessionTimeout, setSessionTimeout] = useState('30 min');
 
   // Profile states
   const [profileName, setProfileName] = useState(user?.full_name || 'Dr. Alice Kim');
@@ -102,6 +112,12 @@ export default function SettingsPage() {
 
       const savedConfidence = localStorage.getItem('settings_confidence');
       if (savedConfidence) setConfidence(Number(savedConfidence));
+
+      const savedFee = localStorage.getItem('settings_fee_schedule');
+      if (savedFee) setFeeSchedule(savedFee);
+
+      const savedEMR = localStorage.getItem('settings_emr_provider');
+      if (savedEMR) setEmrProvider(savedEMR);
     }
   }, []);
 
@@ -130,6 +146,25 @@ export default function SettingsPage() {
     setEditPractice(profilePractice);
     setIsEditingProfile(false);
   };
+
+  const handleTabClick = (tabId: SettingsTab) => {
+    setActiveTab(tabId);
+    if (typeof document !== 'undefined') {
+      const elem = document.getElementById(`settings-section-${tabId}`);
+      if (elem) {
+        elem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  };
+
+  const menuItems = [
+    { id: 'recording' as SettingsTab, label: 'Recording', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg> },
+    { id: 'chart' as SettingsTab, label: 'Chart & Coding', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg> },
+    { id: 'billing' as SettingsTab, label: 'Billing', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> },
+    { id: 'profile' as SettingsTab, label: 'Practice Profile', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
+    { id: 'hipaa' as SettingsTab, label: 'HIPAA & Security', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
+    { id: 'emr' as SettingsTab, label: 'EMR Integration', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> }
+  ];
 
   return (
     <div>
@@ -222,78 +257,86 @@ export default function SettingsPage() {
 
       <div className="page-header">
         <div className="page-title">Settings</div>
-        <div className="page-sub">Practice configuration and demo preferences</div>
+        <div className="page-sub">Practice configuration and system preferences</div>
       </div>
 
-      {notice && (
-        <div className="alert-card" style={{marginBottom:'16px'}}>
-          <div className="alert-icon">OK</div>
-          <div>
-            <div className="alert-title">Demo update</div>
-            <div className="alert-text">{notice}</div>
-          </div>
-        </div>
-      )}
-
       <div style={{display:'grid',gridTemplateColumns:'minmax(220px,280px) 1fr',gap:'20px'}}>
-        <div style={{background:'var(--white)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',overflow:'hidden',height:'fit-content'}}>
-          {[
-            { label: 'Recording', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg> },
-            { label: 'Chart & Coding', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg> },
-            { label: 'Billing', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> },
-            { label: 'Practice Profile', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
-            { label: 'HIPAA & Security', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
-            { label: 'EMR Integration', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> }
-          ].map((item,i) => (
-            <div key={item.label} style={{padding:'12px 16px',fontSize:'13px',fontWeight:500,color:i===0?'var(--teal-dark)':'var(--ink2)',cursor:'pointer',transition:'background .15s',background:i===0?'var(--teal-xpale)':'transparent',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:'10px'}}>
-              {item.icon}
-              {item.label}
-            </div>
-          ))}
+        {/* Left Sidebar Menu */}
+        <div style={{background:'var(--white)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',overflow:'hidden',height:'fit-content',position:'sticky',top:'80px'}}>
+          {menuItems.map(item => {
+            const isActive = activeTab === item.id;
+            return (
+              <div 
+                key={item.id} 
+                onClick={() => handleTabClick(item.id)}
+                style={{
+                  padding:'12px 16px',
+                  fontSize:'13px',
+                  fontWeight: isActive ? 700 : 500,
+                  color: isActive ? 'var(--teal-dark)' : 'var(--ink2)',
+                  cursor:'pointer',
+                  transition:'all .15s ease',
+                  background: isActive ? 'var(--teal-xpale)' : 'transparent',
+                  borderLeft: isActive ? '3.5px solid var(--teal)' : '3.5px solid transparent',
+                  borderBottom:'1px solid var(--border)',
+                  display:'flex',
+                  alignItems:'center',
+                  gap:'10px'
+                }}
+              >
+                {item.icon}
+                {item.label}
+              </div>
+            );
+          })}
         </div>
 
-        <div>
-          {/* PROFILE CARD (Stateful View / Edit Modes) */}
-          {!isEditingProfile ? (
-            <div className="card mb-20" style={{display:'flex',alignItems:'center',gap:'16px',flexWrap:'wrap'}}>
-              <div className="patient-avatar" style={{width:'56px',height:'56px',borderRadius:'14px',background:'var(--teal-pale)',color:'var(--teal-dark)',fontSize:'18px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                {profileName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-              </div>
-              <div style={{flex:1}}>
-                <div style={{fontFamily:'var(--font-display)',fontSize:'18px',color:'var(--navy)'}}>{profileName}</div>
-                <div style={{fontSize:'12px',color:'var(--ink3)'}}>{profilePractice} · DDS · License #{profileLicense}</div>
-                <div className="mt-4"><span className="badge badge-teal">Active Practice</span></div>
-              </div>
-              <button className="btn-sm btn-ghost" onClick={() => setIsEditingProfile(true)}>Edit Profile</button>
-            </div>
-          ) : (
-            <form onSubmit={handleSaveProfile} className="card mb-20" style={{display:'flex',flexDirection:'column',gap:'12px'}}>
-              <div style={{fontSize:'14px',fontWeight:'bold',color:'var(--navy)'}}>Edit Practice Profile</div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))',gap:'12px'}}>
-                <div>
-                  <label className="form-label">Full Name</label>
-                  <input className="form-input" type="text" value={editName} onChange={e => setEditName(e.target.value)} required style={{height:'36px', marginBottom:0}}/>
+        {/* Right Main Content Area */}
+        <div style={{display:'flex',flexDirection:'column',gap:'20px'}}>
+          {/* PRACTICE PROFILE CARD */}
+          <div id="settings-section-profile">
+            {!isEditingProfile ? (
+              <div className="card" style={{display:'flex',alignItems:'center',gap:'16px',flexWrap:'wrap'}}>
+                <div className="patient-avatar" style={{width:'56px',height:'56px',borderRadius:'14px',background:'var(--teal-pale)',color:'var(--teal-dark)',fontSize:'18px',fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  {profileName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
                 </div>
-                <div>
-                  <label className="form-label">License Number</label>
-                  <input className="form-input" type="text" value={editLicense} onChange={e => setEditLicense(e.target.value)} required style={{height:'36px', marginBottom:0}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontFamily:'var(--font-display)',fontSize:'18px',color:'var(--navy)'}}>{profileName}</div>
+                  <div style={{fontSize:'12px',color:'var(--ink3)'}}>{profilePractice} · DDS · License #{profileLicense}</div>
+                  <div className="mt-4"><span className="badge badge-teal">Active Practice</span></div>
                 </div>
-                <div style={{gridColumn:'1 / -1'}}>
-                  <label className="form-label">Practice Name</label>
-                  <input className="form-input" type="text" value={editPractice} onChange={e => setEditPractice(e.target.value)} required style={{height:'36px', marginBottom:0}}/>
+                <button className="btn-sm btn-ghost" onClick={() => setIsEditingProfile(true)}>Edit Profile</button>
+              </div>
+            ) : (
+              <form onSubmit={handleSaveProfile} className="card" style={{display:'flex',flexDirection:'column',gap:'12px'}}>
+                <div style={{fontSize:'14px',fontWeight:'bold',color:'var(--navy)'}}>Edit Practice Profile</div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))',gap:'12px'}}>
+                  <div>
+                    <label className="form-label">Full Name</label>
+                    <input className="form-input" type="text" value={editName} onChange={e => setEditName(e.target.value)} required style={{height:'36px', marginBottom:0}}/>
+                  </div>
+                  <div>
+                    <label className="form-label">License Number</label>
+                    <input className="form-input" type="text" value={editLicense} onChange={e => setEditLicense(e.target.value)} required style={{height:'36px', marginBottom:0}}/>
+                  </div>
+                  <div style={{gridColumn:'1 / -1'}}>
+                    <label className="form-label">Practice Name</label>
+                    <input className="form-input" type="text" value={editPractice} onChange={e => setEditPractice(e.target.value)} required style={{height:'36px', marginBottom:0}}/>
+                  </div>
                 </div>
-              </div>
-              <div style={{display:'flex',gap:'8px',justifyContent:'flex-end',marginTop:'8px'}}>
-                <button type="button" className="btn-sm btn-ghost" onClick={handleCancelProfileEdit}>Cancel</button>
-                <button type="submit" className="btn-sm btn-teal">Save Profile</button>
-              </div>
-            </form>
-          )}
+                <div style={{display:'flex',gap:'8px',justifyContent:'flex-end',marginTop:'8px'}}>
+                  <button type="button" className="btn-sm btn-ghost" onClick={handleCancelProfileEdit}>Cancel</button>
+                  <button type="submit" className="btn-sm btn-teal">Save Profile</button>
+                </div>
+              </form>
+            )}
+          </div>
 
-          <div className="card">
+          {/* RECORDING PREFERENCES CARD */}
+          <div id="settings-section-recording" className="card">
             <div style={{fontSize:'14px',fontWeight:700,color:'var(--navy)',marginBottom:'16px'}}>Recording Preferences</div>
             
-            {/* Setting 1: Tooth System */}
+            {/* Tooth System */}
             <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'1px solid var(--border)'}}>
               <div style={{width:'36px',height:'36px',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'17px',flexShrink:0,background:'var(--teal-pale)'}}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{color:'var(--navy)'}}><circle cx="12" cy="12" r="10"/><line x1="2" x2="22" y1="12" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
@@ -318,7 +361,7 @@ export default function SettingsPage() {
               </select>
             </div>
 
-            {/* Setting 2: Speaker Diarisation */}
+            {/* Speaker Diarisation */}
             <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'1px solid var(--border)'}}>
               <div style={{width:'36px',height:'36px',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'17px',flexShrink:0,background:'var(--teal-pale)'}}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{color:'var(--navy)'}}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
@@ -340,8 +383,8 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Setting 3: Auto Stop */}
-            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'1px solid var(--border)'}}>
+            {/* Auto Stop */}
+            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'none'}}>
               <div style={{width:'36px',height:'36px',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'17px',flexShrink:0,background:'var(--teal-pale)'}}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{color:'var(--navy)'}}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
               </div>
@@ -364,9 +407,14 @@ export default function SettingsPage() {
                 <option>Off</option>
               </select>
             </div>
+          </div>
 
-            {/* Setting 4: RAG Knowledge base */}
-            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'none'}}>
+          {/* CHART & CODING CARD */}
+          <div id="settings-section-chart" className="card">
+            <div style={{fontSize:'14px',fontWeight:700,color:'var(--navy)',marginBottom:'16px'}}>Chart &amp; Coding Preferences</div>
+            
+            {/* RAG Knowledge base */}
+            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'1px solid var(--border)'}}>
               <div style={{width:'36px',height:'36px',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'17px',flexShrink:0,background:'var(--teal-pale)'}}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{color:'var(--navy)'}}><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
               </div>
@@ -374,36 +422,11 @@ export default function SettingsPage() {
                 <div style={{fontSize:'13px',fontWeight:600,color:'var(--ink)'}}>RAG knowledge base</div>
                 <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'1px'}}>CDT descriptor version for code matching</div>
               </div>
-              <span style={{fontSize:'12px',color:'var(--ink3)',fontWeight:600}}>CDT 2024</span>
+              <span style={{fontSize:'12px',color:'var(--teal-dark)',fontWeight:700}}>CDT 2024</span>
             </div>
 
-            <div className="divider"/>
-            <div style={{fontSize:'14px',fontWeight:700,color:'var(--navy)',marginBottom:'16px'}}>Billing &amp; Audit</div>
-
-            {/* Setting 5: Revenue Alerts */}
-            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'1px solid var(--border)'}}>
-              <div style={{width:'36px',height:'36px',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'17px',flexShrink:0,background:'#FEF3E2'}}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{color:'var(--orange-c)'}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-              </div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:'13px',fontWeight:600,color:'var(--ink)'}}>Revenue audit alerts</div>
-                <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'1px'}}>Flag missed or underbilled procedures</div>
-              </div>
-              <div 
-                className={`toggle-wrap ${revenueAlerts ? '' : 'off'}`} 
-                onClick={() => {
-                  const nextVal = !revenueAlerts;
-                  setRevenueAlerts(nextVal);
-                  localStorage.setItem('settings_revenue_alerts', String(nextVal));
-                  setToastMessage(`Revenue alerts turned ${nextVal ? 'ON' : 'OFF'}`);
-                }}
-              >
-                <div className="toggle-dot" />
-              </div>
-            </div>
-
-            {/* Setting 6: Threshold */}
-            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'1px solid var(--border)'}}>
+            {/* Threshold */}
+            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'none'}}>
               <div style={{width:'36px',height:'36px',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'17px',flexShrink:0,background:'var(--teal-pale)'}}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{color:'var(--navy)'}}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
               </div>
@@ -427,9 +450,87 @@ export default function SettingsPage() {
                 <option value={90}>90%</option>
               </select>
             </div>
+          </div>
 
-            {/* Setting 7: HIPAA logs button */}
+          {/* BILLING & AUDIT CARD */}
+          <div id="settings-section-billing" className="card">
+            <div style={{fontSize:'14px',fontWeight:700,color:'var(--navy)',marginBottom:'16px'}}>Billing &amp; Audit</div>
+            
+            {/* Revenue Alerts */}
+            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'1px solid var(--border)'}}>
+              <div style={{width:'36px',height:'36px',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'17px',flexShrink:0,background:'#FEF3E2'}}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{color:'var(--orange-c)'}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:'13px',fontWeight:600,color:'var(--ink)'}}>Revenue audit alerts</div>
+                <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'1px'}}>Flag missed or underbilled procedures automatically</div>
+              </div>
+              <div 
+                className={`toggle-wrap ${revenueAlerts ? '' : 'off'}`} 
+                onClick={() => {
+                  const nextVal = !revenueAlerts;
+                  setRevenueAlerts(nextVal);
+                  localStorage.setItem('settings_revenue_alerts', String(nextVal));
+                  setToastMessage(`Revenue alerts turned ${nextVal ? 'ON' : 'OFF'}`);
+                }}
+              >
+                <div className="toggle-dot" />
+              </div>
+            </div>
+
+            {/* Fee Schedule */}
+            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'1px solid var(--border)'}}>
+              <div style={{width:'36px',height:'36px',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'17px',flexShrink:0,background:'var(--teal-pale)'}}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{color:'var(--navy)'}}><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:'13px',fontWeight:600,color:'var(--ink)'}}>Practice fee schedule</div>
+                <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'1px'}}>Baseline fees used for revenue calculations</div>
+              </div>
+              <select 
+                className="form-select" 
+                value={feeSchedule} 
+                onChange={e => {
+                  const val = e.target.value;
+                  setFeeSchedule(val);
+                  localStorage.setItem('settings_fee_schedule', val);
+                  setToastMessage(`Fee schedule set to ${val}`);
+                }}
+              >
+                <option>Standard Practice Fees</option>
+                <option>PPO Discounted</option>
+                <option>Medicaid Schedule</option>
+              </select>
+            </div>
+
+            {/* Auto Validate */}
             <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'none'}}>
+              <div style={{width:'36px',height:'36px',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'17px',flexShrink:0,background:'var(--teal-pale)'}}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{color:'var(--navy)'}}><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:'13px',fontWeight:600,color:'var(--ink)'}}>Auto-validate CDT matches</div>
+                <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'1px'}}>Pre-check CDT codes against extraction rules</div>
+              </div>
+              <div 
+                className={`toggle-wrap ${autoValidate ? '' : 'off'}`} 
+                onClick={() => {
+                  const nextVal = !autoValidate;
+                  setAutoValidate(nextVal);
+                  setToastMessage(`Auto-validation ${nextVal ? 'enabled' : 'disabled'}`);
+                }}
+              >
+                <div className="toggle-dot" />
+              </div>
+            </div>
+          </div>
+
+          {/* HIPAA & SECURITY CARD */}
+          <div id="settings-section-hipaa" className="card">
+            <div style={{fontSize:'14px',fontWeight:700,color:'var(--navy)',marginBottom:'16px'}}>HIPAA &amp; Security Compliance</div>
+            
+            {/* Audit logs */}
+            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'1px solid var(--border)'}}>
               <div style={{width:'36px',height:'36px',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'17px',flexShrink:0,background:'#FEEEEE'}}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{color:'var(--red-c)'}}><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
               </div>
@@ -445,9 +546,98 @@ export default function SettingsPage() {
               </button>
             </div>
 
+            {/* Encryption */}
+            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'1px solid var(--border)'}}>
+              <div style={{width:'36px',height:'36px',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'17px',flexShrink:0,background:'var(--teal-pale)'}}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{color:'var(--teal-dark)'}}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:'13px',fontWeight:600,color:'var(--ink)'}}>EHR Data Encryption</div>
+                <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'1px'}}>AES-256 at rest, TLS 1.3 in transit</div>
+              </div>
+              <span className="badge badge-teal" style={{fontSize:'11px'}}>✓ Active</span>
+            </div>
+
+            {/* Timeout */}
+            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'none'}}>
+              <div style={{width:'36px',height:'36px',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'17px',flexShrink:0,background:'var(--teal-pale)'}}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{color:'var(--navy)'}}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:'13px',fontWeight:600,color:'var(--ink)'}}>Auto-lock session timeout</div>
+                <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'1px'}}>Lock application after inactivity</div>
+              </div>
+              <select 
+                className="form-select" 
+                value={sessionTimeout} 
+                onChange={e => {
+                  setSessionTimeout(e.target.value);
+                  setToastMessage(`Session timeout set to ${e.target.value}`);
+                }}
+              >
+                <option>15 min</option>
+                <option>30 min</option>
+                <option>60 min</option>
+              </select>
+            </div>
           </div>
 
-          <div style={{marginTop:'16px',textAlign:'center'}}>
+          {/* EMR INTEGRATION CARD */}
+          <div id="settings-section-emr" className="card">
+            <div style={{fontSize:'14px',fontWeight:700,color:'var(--navy)',marginBottom:'16px'}}>EMR &amp; Practice Management Sync</div>
+            
+            {/* EMR Provider */}
+            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'1px solid var(--border)'}}>
+              <div style={{width:'36px',height:'36px',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'17px',flexShrink:0,background:'var(--teal-pale)'}}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{color:'var(--navy)'}}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:'13px',fontWeight:600,color:'var(--ink)'}}>Practice software provider</div>
+                <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'1px'}}>Select target EMR system for auto-export</div>
+              </div>
+              <select 
+                className="form-select" 
+                value={emrProvider} 
+                onChange={e => {
+                  const val = e.target.value;
+                  setEmrProvider(val);
+                  localStorage.setItem('settings_emr_provider', val);
+                  setToastMessage(`EMR provider updated to ${val}`);
+                }}
+              >
+                <option>Dentrix</option>
+                <option>Eaglesoft</option>
+                <option>Open Dental</option>
+                <option>CSV Export Only</option>
+              </select>
+            </div>
+
+            {/* Sync frequency */}
+            <div style={{display:'flex',alignItems:'center',gap:'12px',padding:'14px 0',borderBottom:'none'}}>
+              <div style={{width:'36px',height:'36px',borderRadius:'10px',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'17px',flexShrink:0,background:'var(--teal-pale)'}}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{color:'var(--navy)'}}><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:'13px',fontWeight:600,color:'var(--ink)'}}>Sync Frequency</div>
+                <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'1px'}}>How often chart entries export to EMR</div>
+              </div>
+              <select 
+                className="form-select" 
+                value={syncFreq} 
+                onChange={e => {
+                  setSyncFreq(e.target.value);
+                  setToastMessage(`Sync frequency set to ${e.target.value}`);
+                }}
+              >
+                <option>Real-time</option>
+                <option>Hourly Batch</option>
+                <option>End of Day</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Sign Out Button */}
+          <div style={{marginTop:'20px',textAlign:'center'}}>
             <button 
               className="btn-sm btn-ghost" 
               style={{color:'#A03030',borderColor:'rgba(200,64,64,0.2)'}}

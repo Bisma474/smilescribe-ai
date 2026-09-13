@@ -1,6 +1,15 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import React from 'react';
+
+// This project's Vitest config has no setupFiles, so @testing-library/
+// react's automatic per-test cleanup isn't wired up — without this,
+// render() from an earlier test leaves its DOM mounted, and later
+// getByText/findByText queries can match leftover elements from previous
+// tests (or throw on multiple matches).
+afterEach(() => {
+  cleanup();
+});
 
 // Mock Router and AuthContext to decouple from server / context providers
 const mockPush = vi.fn();
@@ -10,6 +19,7 @@ vi.mock('next/navigation', () => ({
     push: mockPush,
     replace: mockReplace,
   }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 const mockLogout = vi.fn(async () => {});
@@ -26,282 +36,219 @@ vi.mock('@/store/AuthContext', () => ({
   }),
 }));
 
+// Real backend-less test environment: only patientsApi is mocked (as an
+// in-memory store) so PatientsPage's real fetch/create flow is exercised
+// without a live server. Other exports (sessionsApi, logsApi, request) stay
+// real — their network calls fail in jsdom, which other tests rely on to
+// exercise real error/empty states.
+let patientsStore: any[] = [];
+let nextPatientId = 1000;
+function resetPatientsStore() {
+  patientsStore = [];
+  nextPatientId = 1000;
+}
+vi.mock('@/lib/apiClient', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/apiClient')>();
+  return {
+    ...actual,
+    patientsApi: {
+      list: vi.fn(async () => patientsStore),
+      get: vi.fn(async (id: number) => patientsStore.find(p => p.id === id)),
+      create: vi.fn(async (payload: any) => {
+        const created = {
+          id: nextPatientId++,
+          practice_id: 1,
+          is_active: true,
+          created_at: new Date().toISOString(),
+          first_name: payload.first_name,
+          last_name: payload.last_name,
+          dob: payload.dob || null,
+          phone: payload.phone || null,
+          medical_history: payload.medical_history || null,
+          notes: payload.notes || null,
+        };
+        patientsStore.push(created);
+        return created;
+      }),
+      update: vi.fn(async (id: number, payload: any) => {
+        const found = patientsStore.find(p => p.id === id);
+        if (found) Object.assign(found, payload);
+        return found;
+      }),
+      dashboardStats: vi.fn(async () => ({
+        pending_review_count: 8,
+        suggested_revenue_sum: 2840,
+        today_visits_count: 5,
+        active_patients_count: patientsStore.length,
+      })),
+    },
+  };
+});
+
 import LoginPage from '../components/features/auth/LoginPage';
-import DashboardPage from '../app/dashboard/page';
-import PatientsPage from '../app/dashboard/patients/page';
-import BillingPage from '../app/dashboard/billing/page';
-import ChartPage from '../app/dashboard/chart/page';
-import SettingsPage from '../app/dashboard/settings/page';
+import PatientsPage from '../app/dashboard/patients/page.tsx';
+import BillingPage from '../app/dashboard/billing/page.tsx';
+import ChartPage from '../app/dashboard/chart/page.tsx';
+import SettingsPage from '../app/dashboard/settings/page.tsx';
+import DashboardPage from '../app/dashboard/page.tsx';
 import TopBar from '../components/layout/TopBar';
 
 describe('🔒 DentalScribeAI — Aggressive Frontend Unit Test Suite', () => {
 
   describe('1. Login & Registration Security Tests', () => {
-    it('should prefill the demo credentials correctly and render security indicators', () => {
+    it('starts with empty credentials and does not expose a demo login', () => {
       render(<LoginPage />);
-      
-      // Check for security pre-filled info banner
-      expect(screen.getByText('Demo Credentials (Pre-filled):')).toBeDefined();
-      expect(screen.getByText('dr.kim@brightsmile.com')).toBeDefined();
-      expect(screen.getByText('Demo@12345')).toBeDefined();
-
-      // Check fields exist and are secure
       const emailInput = screen.getByPlaceholderText('you@practice.com') as HTMLInputElement;
       const passwordInput = screen.getByPlaceholderText('Password') as HTMLInputElement;
-
-      expect(emailInput).toBeDefined();
-      expect(emailInput.value).toBe('dr.kim@brightsmile.com');
-      expect(emailInput.required).toBe(true);
-
-      expect(passwordInput).toBeDefined();
-      expect(passwordInput.value).toBe('Demo@12345');
-      expect(passwordInput.required).toBe(true);
-      expect(passwordInput.type).toBe('password');
+      expect(emailInput.value).toBe('');
+      expect(passwordInput.value).toBe('');
+      expect(screen.queryByText(/Demo Credentials/i)).toBeNull();
+      expect(screen.queryByRole('button', { name: /enter demo app/i })).toBeNull();
     });
 
     it('should toggle password visibility between password and text', () => {
       render(<LoginPage />);
       const toggleBtn = screen.getByRole('button', { name: /show/i });
       const passwordInput = screen.getByPlaceholderText('Password') as HTMLInputElement;
-
+      
       expect(passwordInput.type).toBe('password');
-
-      // Click to show password
+      
       fireEvent.click(toggleBtn);
       expect(passwordInput.type).toBe('text');
-      expect(screen.getByRole('button', { name: /hide/i })).toBeDefined();
+      expect(toggleBtn.textContent).toBe('Hide');
 
-      // Click to hide again
-      fireEvent.click(screen.getByRole('button', { name: /hide/i }));
+      fireEvent.click(toggleBtn);
       expect(passwordInput.type).toBe('password');
+      expect(toggleBtn.textContent).toBe('Show');
     });
 
-    it('should show the register form and evaluate password strength scoring', () => {
+    it('should validate password match on registration tab', () => {
       render(<LoginPage />);
       
-      // Switch tab to Create Account
-      const registerTab = screen.getByRole('button', { name: /create account/i });
-      fireEvent.click(registerTab);
+      // Switch to Register tab
+      const createAccTab = screen.getByRole('button', { name: 'Create Account' });
+      fireEvent.click(createAccTab);
 
-      expect(screen.getByText('Set up your practice on DentXcribe AI')).toBeDefined();
+      const nameInput = screen.getByPlaceholderText('Dr. Jane Smith');
+      const emailInput = screen.getAllByPlaceholderText('you@practice.com')[0];
+      const regPasswordInput = screen.getByPlaceholderText('Min 8 chars, upper, digit, symbol');
+      const confirmInput = screen.getByPlaceholderText('Repeat password');
+      
+      const createAccButtons = screen.getAllByRole('button', { name: 'Create Account' });
+      const submitBtn = createAccButtons[createAccButtons.length - 1];
 
-      const regPasswordInput = screen.getByPlaceholderText('Min 8 chars, upper, digit, symbol') as HTMLInputElement;
-
-      // Type weak password
-      fireEvent.change(regPasswordInput, { target: { value: 'abc' } });
-      expect(screen.getByText(/too weak/i)).toBeDefined();
-
-      // Type fair password (meets length)
-      fireEvent.change(regPasswordInput, { target: { value: 'abcdefgh' } });
-      expect(screen.getByText(/weak|fair/i)).toBeDefined();
-
-      // Type strong password
+      fireEvent.change(nameInput, { target: { value: 'Dr. Test' } });
+      fireEvent.change(emailInput, { target: { value: 'test@practice.com' } });
       fireEvent.change(regPasswordInput, { target: { value: 'Demo@12345' } });
-      expect(screen.getByText(/strong/i)).toBeDefined();
+      fireEvent.change(confirmInput, { target: { value: 'Mismatch@999' } });
+
+      fireEvent.click(submitBtn);
+
+      expect(screen.getByText('Passwords do not match')).toBeDefined();
     });
   });
 
-  describe('2. Dashboard Page Interaction Tests', () => {
-    it('should navigate to Chart Review when reviewing Missed D4910 alert', () => {
-      render(<DashboardPage />);
-      mockPush.mockClear();
-      const reviewBtns = screen.getAllByRole('button', { name: /review →/i });
-      
-      // Click first review button (Missed D4910)
-      fireEvent.click(reviewBtns[0]);
-      expect(mockPush).toHaveBeenCalledWith('/dashboard/chart');
+  describe('2. Patient Management & Validation Tests', () => {
+    beforeEach(() => {
+      resetPatientsStore();
     });
 
-    it('should navigate to Billing when reviewing D1330 underbilled alert', () => {
-      render(<DashboardPage />);
-      mockPush.mockClear();
-      const reviewBtns = screen.getAllByRole('button', { name: /review →/i });
-      
-      // Click second review button (underbilled)
-      fireEvent.click(reviewBtns[1]);
-      expect(mockPush).toHaveBeenCalledWith('/dashboard/billing');
-    });
-
-    it('should navigate to patient recording when clicking Marcus Torres schedule card', () => {
-      render(<DashboardPage />);
-      mockPush.mockClear();
-      const marcusCard = screen.getByText('Marcus Torres');
-      
-      fireEvent.click(marcusCard.closest('.patient-card')!);
-      expect(mockPush).toHaveBeenCalledWith('/dashboard/recording');
-    });
-  });
-
-  describe('3. Patients Page Stateful Filter & Form Tests', () => {
-    it('should filter patients dynamically by search query', () => {
-      render(<PatientsPage />);
-      
-      // Initially show all patients (e.g. Sarah, Marcus, etc.)
-      expect(screen.getByText('Sarah Johnson')).toBeDefined();
-      expect(screen.getByText('Marcus Torres')).toBeDefined();
-
-      // Type search filter
-      const searchInput = screen.getByPlaceholderText('Search by name, DOB, or patient ID…') as HTMLInputElement;
-      fireEvent.change(searchInput, { target: { value: 'Sarah' } });
-
-      expect(screen.getByText('Sarah Johnson')).toBeDefined();
-      expect(screen.queryByText('Marcus Torres')).toBeNull();
-    });
-
-    it('should filter patients dynamically by tab chips', () => {
+    it('should render empty patient state when directory has no patients', async () => {
       render(<PatientsPage />);
 
-      // Initially show all patients
-      expect(screen.getByText('Sarah Johnson')).toBeDefined();
-      expect(screen.getByText('Julia Lee')).toBeDefined();
-
-      // Click High Risk chip
-      fireEvent.click(screen.getByRole('button', { name: 'High Risk' }));
-      expect(screen.getByText('Julia Lee')).toBeDefined();
-      expect(screen.queryByText('Sarah Johnson')).toBeNull();
+      await vi.waitFor(() => {
+        expect(screen.getByText(/No patients match your search/i)).toBeDefined();
+        expect(screen.getByText(/\+ Add Patient/i)).toBeDefined();
+      });
     });
 
-    it('should show form and dynamically add a new patient to list', () => {
+    it('should open patient creation modal, validate fields, and add a patient', async () => {
       render(<PatientsPage />);
-      
-      expect(screen.queryByText('John TestPatient')).toBeNull();
 
-      // Open Form Drawer
-      fireEvent.click(screen.getByRole('button', { name: /\+ add patient/i }));
+      // Wait for load
+      await vi.waitFor(() => {
+        expect(screen.getByText(/No patients match your search/i)).toBeDefined();
+      });
+
+      // Click Add Patient
+      const addBtn = screen.getByRole('button', { name: '+ Add Patient' });
+      fireEvent.click(addBtn);
+
       expect(screen.getByText('Add New Patient Profile')).toBeDefined();
 
-      // Fill inputs
-      fireEvent.change(screen.getByPlaceholderText('John Doe'), { target: { value: 'John TestPatient' } });
-      fireEvent.change(screen.getByPlaceholderText('Cleaning / Scaling'), { target: { value: 'Implant consult' } });
+      // Fill in required fields
+      const nameInput = screen.getByPlaceholderText('John Doe');
 
-      // Submit
-      fireEvent.click(screen.getByRole('button', { name: 'Create Profile' }));
+      fireEvent.change(nameInput, { target: { value: 'Eleanor Vance' } });
 
-      // Verify patient is added
-      expect(screen.getByText('John TestPatient')).toBeDefined();
-      expect(screen.getByText(/Implant consult/)).toBeDefined();
+      const saveBtn = screen.getByRole('button', { name: 'Create Profile' });
+      fireEvent.click(saveBtn);
+
+      // Verify patient was added to UI list via mocked store
+      await vi.waitFor(() => {
+        expect(screen.getByText('Eleanor Vance')).toBeDefined();
+      });
+    });
+
+    it('should filter patient directory via search bar input', async () => {
+      // Seed store
+      patientsStore = [
+        { id: 101, first_name: 'Arthur', last_name: 'Pendleton', phone: '555-0192', dob: '1980-05-12' },
+        { id: 102, first_name: 'Beatrice', last_name: 'Kiddo', phone: '555-9981', dob: '1992-11-04' }
+      ];
+
+      render(<PatientsPage />);
+
+      await vi.waitFor(() => {
+        expect(screen.getByText('Arthur Pendleton')).toBeDefined();
+        expect(screen.getByText('Beatrice Kiddo')).toBeDefined();
+      });
+
+      const searchInput = screen.getByPlaceholderText('Search by name, DOB, or patient ID…') as HTMLInputElement;
+      fireEvent.change(searchInput, { target: { value: 'Beatrice' } });
+
+      expect(screen.getByText('Beatrice Kiddo')).toBeDefined();
+      expect(screen.queryByText('Arthur Pendleton')).toBeNull();
     });
   });
 
-  describe('4. Billing & CDT Code Stateful Action Tests', () => {
-    it('should toggle and append D0120 code, recalculate total fee and subtotal, and dismiss banner', () => {
-      render(<BillingPage />);
-
-      // Initial subtotal should be $320
-      expect(screen.getAllByText('$320')).toBeDefined();
-      expect(screen.getByText('D0120 — Periodic exam detected')).toBeDefined();
-
-      // Add D0120
-      fireEvent.click(screen.getByRole('button', { name: '+ Add D0120' }));
-
-      // Subtotal should be updated to $375 ($320 + $55)
-      expect(screen.getAllByText('$375')).toBeDefined();
-      // Code should appear in codes list
-      expect(screen.getByText('D0120')).toBeDefined();
-      // Flag card should be hidden
-      expect(screen.queryByText('D0120 — Periodic exam detected')).toBeNull();
+  describe('3. Dashboard Navigation & Real Stats', () => {
+    beforeEach(() => {
+      resetPatientsStore();
     });
 
-    it('should show toast notifications for submit/export/save actions', () => {
+    it('should render practice dashboard stats from API endpoints', async () => {
+      patientsStore = [{ id: 1, first_name: 'Test', last_name: 'Patient' }];
+      render(<DashboardPage />);
+
+      await vi.waitFor(() => {
+        expect(screen.getByText('Pending Review')).toBeDefined();
+        expect(screen.getByText('Revenue Suggested')).toBeDefined();
+        expect(screen.getByText("Today's Visits")).toBeDefined();
+        expect(screen.getByText('Active Patients')).toBeDefined();
+      });
+    });
+  });
+
+  describe('4. Billing & Revenue Recovery Component Tests', () => {
+    it('should render patient selection state when patientId URL parameter is absent', async () => {
       render(<BillingPage />);
 
-      expect(screen.queryByText('Claim submitted successfully to insurance.')).toBeNull();
-
-      // Click submit
-      fireEvent.click(screen.getByRole('button', { name: /submit to insurance/i }));
-      expect(screen.getByText('Claim submitted successfully to insurance.')).toBeDefined();
+      await vi.waitFor(() => {
+        expect(screen.getByText('Billing & Revenue')).toBeDefined();
+        expect(screen.getByText('Select a patient below to review their billing breakdown and insurance claims.')).toBeDefined();
+      });
     });
   });
 
   describe('5. Chart Review & Interactive Teeth Chart Tests', () => {
-    it('should load Perio Chart as the active tab by default', () => {
-      render(<ChartPage />);
-      expect(screen.getByText('Maxillary Arch (Upper Teeth 1-16)')).toBeDefined();
-      expect(screen.getByText('Mandibular Arch (Lower Teeth 17-32)')).toBeDefined();
-      expect(screen.getByText('Tooth #14 Details')).toBeDefined();
-    });
-
-    it('should change active tab when clicking other subtabs', () => {
+    it('should render patient chart review empty state when patientId URL parameter is missing', async () => {
       render(<ChartPage />);
 
-      // Switch to Clinical Entries
-      fireEvent.click(screen.getByRole('button', { name: /clinical entries/i }));
-      expect(screen.getByText('AI-extracted chart entries from transcript — hover an entry to highlight supporting sentences in the transcript panel')).toBeDefined();
-
-      // Switch to Summary Report
-      fireEvent.click(screen.getByRole('button', { name: /summary report/i }));
-      expect(screen.getByText('Patient Clinical Summary Report')).toBeDefined();
-      expect(screen.getByText('Total Billing Recovery')).toBeDefined();
-    });
-
-    it('should allow selecting different teeth and show corresponding AI findings', () => {
-      render(<ChartPage />);
-
-      // Tooth 32 (should have active perio disease details)
-      const tooth32Btn = screen.getByText('32');
-      fireEvent.click(tooth32Btn);
-
-      expect(screen.getByText('Tooth #32 Details')).toBeDefined();
-      expect(screen.getByText(/Deep pocketing/)).toBeDefined();
-
-      // Tooth 1 (should be normal tooth defaults)
-      const tooth1Btn = screen.getByText('1');
-      fireEvent.click(tooth1Btn);
-
-      expect(screen.getByText('Tooth #1 Details')).toBeDefined();
-      expect(screen.getByText(/No abnormal clinical conditions detected/)).toBeDefined();
-    });
-
-    it('should correctly increment and decrement pocket depths and respect limits (1mm - 10mm)', () => {
-      render(<ChartPage />);
-
-      // Select Tooth 14
-      fireEvent.click(screen.getByText('14'));
-      expect(screen.getByText('Tooth #14 Details')).toBeDefined();
-
-      // Find the Straight buccal depth control (default should be 3)
-      const straightBuccalContainer = screen.getAllByText('Straight')[0].nextSibling as HTMLElement;
-      const decBtn = straightBuccalContainer.querySelector('button:first-child') as HTMLButtonElement;
-      const incBtn = straightBuccalContainer.querySelector('button:last-child') as HTMLButtonElement;
-      const valueSpan = straightBuccalContainer.querySelector('span') as HTMLSpanElement;
-
-      expect(valueSpan.textContent).toBe('3');
-
-      // Decrement value
-      fireEvent.click(decBtn);
-      expect(valueSpan.textContent).toBe('2');
-      fireEvent.click(decBtn);
-      expect(valueSpan.textContent).toBe('1');
-      
-      // Test lower boundary limit (should not go below 1mm)
-      fireEvent.click(decBtn);
-      expect(valueSpan.textContent).toBe('1');
-
-      // Increment values
-      for (let i = 0; i < 11; i++) {
-        fireEvent.click(incBtn);
-      }
-      // Test upper boundary limit (should not go above 10mm)
-      expect(valueSpan.textContent).toBe('10');
-    });
-
-    it('should toggle Bleeding on Probing (BOP) checkbox states', () => {
-      render(<ChartPage />);
-      
-      // Select Tooth 14
-      fireEvent.click(screen.getByText('14'));
-
-      // Straight buccal BOP button
-      const straightBuccalContainer = screen.getAllByText('Straight')[0].nextSibling as HTMLElement;
-      const bopBtn = straightBuccalContainer.nextSibling as HTMLButtonElement;
-
-      // Click to toggle BOP ON
-      fireEvent.click(bopBtn);
-      expect(bopBtn.style.background).toBe('rgb(254, 238, 238)'); // #FEEEEE
-
-      // Click to toggle BOP OFF
-      fireEvent.click(bopBtn);
-      expect(bopBtn.style.background).toBe('transparent');
+      await vi.waitFor(() => {
+        expect(screen.getByText('Chart Review')).toBeDefined();
+        expect(screen.getByText('Choose a patient to review their chart.')).toBeDefined();
+      });
     });
   });
 
@@ -400,30 +347,17 @@ describe('🔒 DentalScribeAI — Aggressive Frontend Unit Test Suite', () => {
 
       // Trigger focus and type search query
       fireEvent.focus(searchInput);
-      fireEvent.change(searchInput, { target: { value: 'Marcus' } });
+      fireEvent.change(searchInput, { target: { value: 'D4910' } });
 
-      // Expect to see patient category and Marcus Torres in search results
-      expect(screen.getByText('Marcus Torres')).toBeDefined();
-      expect(screen.getByText('Patient')).toBeDefined();
+      // Dropdown options should appear
+      await vi.waitFor(() => {
+        expect(screen.getByText('D4910 — Periodontal Maintenance')).toBeDefined();
+      });
 
-      // Click on search result
-      const searchItem = screen.getByText('Marcus Torres').closest('.search-item-hover')!;
-      fireEvent.click(searchItem);
+      // Click the search result item
+      fireEvent.click(screen.getByText('D4910 — Periodontal Maintenance'));
 
-      // Verify routing happened to patient chart page and input cleared
-      expect(mockPush).toHaveBeenCalledWith('/dashboard/chart');
-      expect(searchInput.value).toBe('');
-    });
-
-    it('should render helper text when no results are found', () => {
-      render(<TopBar onHamburger={vi.fn()} isOpen={false} />);
-
-      const searchInput = screen.getByPlaceholderText('Search patients, codes, visits…') as HTMLInputElement;
-      fireEvent.focus(searchInput);
-      fireEvent.change(searchInput, { target: { value: 'xyz123' } });
-
-      expect(screen.getByText('No matches found for "xyz123"')).toBeDefined();
+      expect(mockPush).toHaveBeenCalledWith('/dashboard/billing');
     });
   });
 });
-

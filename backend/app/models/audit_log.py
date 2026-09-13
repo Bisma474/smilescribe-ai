@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, func
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, func
 from app.db.session import Base
 
 class HIPAAAuditLog(Base):
@@ -9,3 +9,5 @@ class HIPAAAuditLog(Base):
     action = Column(String, nullable=False) # Access | Auth | Billing | Settings | Compliance
     user_name = Column(String, nullable=False)
     details = Column(String, nullable=False)
+    # Nullable: rows created before this column existed have no owner.
+    practice_id = Column(Integer, ForeignKey("users.id"), nullable=True)

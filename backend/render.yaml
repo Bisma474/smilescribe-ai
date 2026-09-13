@@ -33,5 +33,7 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: HF_TOKEN
+        sync: false
     healthCheckPath: /health
     autoDeploy: true

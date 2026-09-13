@@ -1,0 +1,1 @@
+ALTER TABLE clinical_sessions ADD COLUMN IF NOT EXISTS follow_up_draft JSONB;

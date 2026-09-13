@@ -1,6 +1,6 @@
 import json
-import os
 from typing import List
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -35,13 +35,18 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql://postgres:password@db.xxxx.supabase.co:5432/postgres"
 
     # ── Auth ─────────────────────────────────────────────────────────────────
-    SECRET_KEY: str = "change-me-in-production-use-openssl-rand-hex-32"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 8
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # Auth is delegated to Supabase Auth — token issuance/verification and
+    # expiry are managed by Supabase, not by this app.
 
     # ── CORS ─────────────────────────────────────────────────────────────────
-    # Read as raw string from env, then parse in property.
-    ALLOWED_ORIGINS_RAW: str = "http://localhost:3000,http://127.0.0.1:3000"
+    # Read as raw string from env (the documented deploy var is
+    # ALLOWED_ORIGINS — see DEPLOY.md — hence the validation_alias, since
+    # the field itself is named _RAW to signal it needs parsing below),
+    # then parsed into a list via the property.
+    ALLOWED_ORIGINS_RAW: str = Field(
+        default="http://localhost:3000,http://127.0.0.1:3000",
+        validation_alias="ALLOWED_ORIGINS",
+    )
 
     @property
     def ALLOWED_ORIGINS(self) -> List[str]:
@@ -54,7 +59,7 @@ class Settings(BaseSettings):
     # ── AI / Transcription ───────────────────────────────────────────────────
     GROQ_API_KEY: str = ""
 
-    # ML Pipeline Settings (kept for compatibility, not used by POC)
+    # ML Pipeline Settings (kept for compatibility, not used by Transcript Review)
     WHISPER_MODEL: str = "base"
     WHISPER_INITIAL_PROMPT: str = (
         "Dental clinical encounter. Terms include: tooth numbering Universal system, "
@@ -68,6 +73,9 @@ class Settings(BaseSettings):
     )
     HF_TOKEN: str = ""
     PYANNOTE_MODEL: str = "pyannote/speaker-diarization-3.1"
+    # audio = pyannote first, then Groq text labels if needed;
+    # text = skip pyannote and use Groq text labels only; off = plain ASR.
+    SPEAKER_LABELING_MODE: str = "audio"
     SPEAKER_LABEL_MAP: dict = {
         "SPEAKER_00": "Dentist",
         "SPEAKER_01": "Patient",
@@ -82,12 +90,8 @@ class Settings(BaseSettings):
         "env_file": ".env",
         "case_sensitive": True,
         "extra": "ignore",
+        "populate_by_name": True,
     }
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        if "ALLOWED_ORIGINS" in os.environ:
-            self.ALLOWED_ORIGINS_RAW = os.environ["ALLOWED_ORIGINS"]
 
 
 settings = Settings()

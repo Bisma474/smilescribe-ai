@@ -1,12 +1,10 @@
-from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from supabase_auth.errors import AuthApiError
+
 from app.core.dependencies import get_db, get_current_active_user
-from app.core.security import (
-    verify_password, hash_password,
-    create_access_token, create_refresh_token, decode_token,
-)
-from app.core.config import settings
+from app.core.profile_sync import get_or_create_profile, UnclaimedLegacyAccountError
+from app.db.supabase_client import get_supabase, get_supabase_admin
 from app.models.user import User
 from app.schemas.user import (
     UserRegister, UserLogin, TokenResponse,
@@ -15,107 +13,93 @@ from app.schemas.user import (
 
 router = APIRouter()
 
-MAX_FAILED_ATTEMPTS = 5
-LOCKOUT_MINUTES = 15
 
-
-def _check_lockout(user: User):
-    if user.locked_until:
-        # Normalize both to timezone-naive UTC datetimes for safe comparison
-        locked_until_naive = user.locked_until
-        if locked_until_naive.tzinfo is not None:
-            locked_until_naive = locked_until_naive.astimezone(timezone.utc).replace(tzinfo=None)
-        
-        now = datetime.utcnow()
-        if now < locked_until_naive:
-            remaining = int((locked_until_naive - now).total_seconds() / 60) + 1
-            raise HTTPException(
-                status_code=status.HTTP_423_LOCKED,
-                detail=f"Account locked. Try again in {remaining} minute(s).",
-            )
-
-
-def _make_tokens(user: User) -> TokenResponse:
-    payload = {"sub": str(user.id), "email": user.email, "role": user.role}
+def _tokens_from_session(session) -> TokenResponse:
     return TokenResponse(
-        access_token=create_access_token(payload),
-        refresh_token=create_refresh_token(payload),
-        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        access_token=session.access_token,
+        refresh_token=session.refresh_token,
+        expires_in=session.expires_in,
     )
 
 
 @router.post("/register", response_model=UserOut, status_code=201)
 def register(body: UserRegister, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == body.email).first():
-        raise HTTPException(status_code=400, detail="Email already registered")
-    user = User(
-        email=body.email,
-        hashed_password=hash_password(body.password),
-        full_name=body.full_name,
-        practice_name=body.practice_name,
-        license_number=body.license_number,
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
+    supabase = get_supabase()
+    try:
+        result = supabase.auth.sign_up({
+            "email": body.email,
+            "password": body.password,
+            "options": {"data": {"full_name": body.full_name}},
+        })
+    except AuthApiError as e:
+        raise HTTPException(status_code=400, detail=e.message)
+
+    if result.user is None:
+        raise HTTPException(status_code=400, detail="Registration failed")
+
+    try:
+        profile = get_or_create_profile(
+            db, result.user.id, body.email,
+            defaults={
+                "full_name": body.full_name,
+                "practice_name": body.practice_name,
+                "license_number": body.license_number,
+            },
+        )
+    except UnclaimedLegacyAccountError:
+        # This email belongs to an existing (pre-migration) profile that
+        # isn't linked to any Supabase Auth identity. Undo the just-created
+        # auth identity rather than leaving an orphaned account behind, and
+        # refuse to silently claim someone else's existing data.
+        get_supabase_admin().auth.admin.delete_user(result.user.id)
+        raise HTTPException(
+            status_code=409,
+            detail="This email is linked to an existing account. Please contact support to migrate it.",
+        )
+    return profile
 
 
 @router.post("/login", response_model=TokenResponse)
 def login(body: UserLogin, db: Session = Depends(get_db)):
+    supabase = get_supabase()
     try:
-        user = db.query(User).filter(User.email == body.email).first()
-    except Exception as e:
-        user = None
-        print(f"Database offline or query failed: {e}")
-
-    # Fallback to demo login if DB is offline or user not found
-    if not user and body.email == "dr.kim@brightsmile.com" and body.password == "Demo@12345":
-        user = User(
-            id=999,
-            email="dr.kim@brightsmile.com",
-            hashed_password=hash_password("Demo@12345"),
-            full_name="Dr. Alice Kim",
-            role="dentist",
-            practice_name="Bright Smile Dental",
-            is_active=True,
-            is_verified=True,
-        )
-        return _make_tokens(user)
-
-    if not user:
+        result = supabase.auth.sign_in_with_password({
+            "email": body.email,
+            "password": body.password,
+        })
+    except AuthApiError:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    if user.id != 999:
-        _check_lockout(user)
+    if result.session is None or result.user is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
-        if not verify_password(body.password, user.hashed_password):
-            user.failed_login_attempts += 1
-            if user.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
-                user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTES)
-            db.commit()
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+    # Ensure a local profile row exists (self-heals for users created
+    # directly via Supabase, e.g. through the dashboard). Deliberately does
+    # NOT auto-link to an existing unclaimed row by email — see
+    # UnclaimedLegacyAccountError.
+    try:
+        get_or_create_profile(db, result.user.id, body.email)
+    except UnclaimedLegacyAccountError:
+        raise HTTPException(
+            status_code=409,
+            detail="This email is linked to an existing account. Please contact support to migrate it.",
+        )
 
-        # Successful login — reset lockout
-        user.failed_login_attempts = 0
-        user.locked_until = None
-        db.commit()
-
-    return _make_tokens(user)
-
+    return _tokens_from_session(result.session)
 
 
 @router.post("/refresh", response_model=TokenResponse)
-def refresh_token(body: RefreshRequest, db: Session = Depends(get_db)):
-    payload = decode_token(body.refresh_token)
-    if payload is None or payload.get("type") != "refresh":
+def refresh_token(body: RefreshRequest):
+    supabase = get_supabase()
+    try:
+        result = supabase.auth.refresh_session(body.refresh_token)
+    except AuthApiError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-    user = db.query(User).filter(User.id == int(payload["sub"])).first()
-    if not user or not user.is_active:
-        raise HTTPException(status_code=401, detail="User not found or inactive")
+    if result.session is None:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-    return _make_tokens(user)
+    return _tokens_from_session(result.session)
 
 
 @router.get("/me", response_model=UserOut)
@@ -127,18 +111,29 @@ def get_me(current_user: User = Depends(get_current_active_user)):
 def change_password(
     body: ChangePasswordRequest,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
 ):
-    if not verify_password(body.current_password, current_user.hashed_password):
+    supabase = get_supabase()
+    # Verify the current password by attempting a real sign-in with it.
+    try:
+        supabase.auth.sign_in_with_password({
+            "email": current_user.email,
+            "password": body.current_password,
+        })
+    except AuthApiError:
         raise HTTPException(status_code=400, detail="Current password is incorrect")
-    current_user.hashed_password = hash_password(body.new_password)
-    db.commit()
+
+    admin = get_supabase_admin()
+    try:
+        admin.auth.admin.update_user_by_id(current_user.auth_user_id, {"password": body.new_password})
+    except AuthApiError as e:
+        raise HTTPException(status_code=400, detail=e.message)
 
 
 @router.post("/logout", status_code=204)
 def logout(_: User = Depends(get_current_active_user)):
-    # Stateless JWT — client discards tokens.
-    # Add token blacklist here if needed.
+    # Supabase sessions are verified per-request; the client simply discards
+    # its tokens. (A server-side sign-out would require the user's own
+    # access token to be forwarded to supabase.auth.sign_out().)
     return
 
 
@@ -154,10 +149,6 @@ def update_profile(
         current_user.practice_name = body.practice_name
     if body.license_number is not None:
         current_user.license_number = body.license_number
-    try:
-        db.commit()
-        db.refresh(current_user)
-    except Exception as e:
-        print(f"Database offline or commit failed: {e}")
+    db.commit()
+    db.refresh(current_user)
     return current_user
-

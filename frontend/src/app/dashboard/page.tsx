@@ -1,120 +1,200 @@
 'use client';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { patientsApi, workflowApi, type DashboardStats, type RecentSession, type PracticeAnalytics } from '@/lib/apiClient';
+import { useAuth } from '@/store/AuthContext';
+
+function timeAgo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
+
+function statusBadge(status: string): { text: string; className: string } {
+  switch (status) {
+    case 'complete':
+      return { text: '✓ Complete', className: 'badge-teal' };
+    case 'processing':
+      return { text: '⬤ Processing', className: 'badge-warn' };
+    case 'error':
+      return { text: '⚠ Error', className: 'badge-gray' };
+    default:
+      return { text: status, className: 'badge-gray' };
+  }
+}
+
+function handleSessionClick(router: ReturnType<typeof useRouter>, s: RecentSession) {
+  if (s.status === 'processing') {
+    router.push(`/dashboard/processing?patientId=${s.patient_id}`);
+  } else {
+    router.push(`/dashboard/chart?patientId=${s.patient_id}`);
+  }
+}
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { user } = useAuth();
 
-  const handlePatientClick = (name: string) => {
-    if (name === 'Marcus Torres') {
-      router.push('/dashboard/recording');
-    } else {
-      router.push('/dashboard/chart');
-    }
-  };
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reviewTasks, setReviewTasks] = useState<any[]>([]);
+  const [analytics, setAnalytics] = useState<PracticeAnalytics | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await patientsApi.dashboardStats();
+        setStats(data);
+        setReviewTasks(await workflowApi.reviewTasks());
+        setAnalytics(await workflowApi.analytics());
+      } catch (err) {
+        console.error('Failed to load dashboard stats:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load dashboard data.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  const firstName = user?.full_name?.split(' ')[0] || 'Doctor';
 
   return (
     <div>
       <div className="page-header">
-        <div className="page-title">Good morning, Dr. Kim</div>
-        <div className="page-sub">Wednesday, April 22 · 4 visits scheduled today</div>
+        <div className="page-title">Good morning, Dr. {firstName}</div>
+        <div className="page-sub">
+          {stats ? `${stats.active_patients} active patient${stats.active_patients === 1 ? '' : 's'}` : 'Loading your practice overview...'}
+        </div>
       </div>
+
+      {error && (
+        <div style={{
+          background: 'rgba(27,58,107,0.06)',
+          border: '1px solid var(--border)',
+          color: 'var(--navy)',
+          padding: '10px 16px',
+          borderRadius: '8px',
+          marginBottom: '16px',
+          fontSize: '12.5px'
+        }}>
+          💡 {error}
+        </div>
+      )}
 
       <div className="stat-grid">
-        <div className="stat-card">
-          <div className="stat-val">4</div>
+        <div 
+          className="stat-card" 
+          onClick={() => router.push('/dashboard/patients')} 
+          style={{ cursor: 'pointer' }}
+          title="View today's visits"
+        >
+          <div className="stat-val">{loading ? '—' : stats?.today_visits ?? 0}</div>
           <div className="stat-lbl">Today&apos;s Visits</div>
-          <div className="stat-trend trend-up">↑ On schedule</div>
         </div>
-        <div className="stat-card">
-          <div className="stat-val warn">2</div>
+        <div 
+          className="stat-card" 
+          onClick={() => router.push('/dashboard/billing')} 
+          style={{ cursor: 'pointer' }}
+          title="Review visits pending billing"
+        >
+          <div className="stat-val warn">{loading ? '—' : stats?.pending_review ?? 0}</div>
           <div className="stat-lbl">Pending Review</div>
-          <div className="stat-trend"><span className="text-muted">Needs attention</span></div>
+          <div className="stat-trend"><span className="text-muted">Needs attention →</span></div>
         </div>
-        <div className="stat-card">
-          <div className="stat-val teal">$840</div>
-          <div className="stat-lbl">Revenue Recovered</div>
-          <div className="stat-trend trend-up">↑ This month</div>
+        <div 
+          className="stat-card" 
+          onClick={() => router.push('/dashboard/billing')} 
+          style={{ cursor: 'pointer' }}
+          title="View suggested revenue & billing"
+        >
+          <div className="stat-val teal">${loading ? '—' : stats?.revenue_suggested ?? 0}</div>
+          <div className="stat-lbl">Revenue Suggested</div>
+          <div className="stat-trend"><span className="text-muted">View details →</span></div>
         </div>
-        <div className="stat-card">
-          <div className="stat-val">97<span style={{fontSize:'16px',color:'var(--ink3)'}}>%</span></div>
-          <div className="stat-lbl">CDT Accuracy</div>
-          <div className="stat-trend trend-up">↑ vs manual</div>
+        <div 
+          className="stat-card" 
+          onClick={() => router.push('/dashboard/patients')} 
+          style={{ cursor: 'pointer' }}
+          title="View active patients"
+        >
+          <div className="stat-val">{loading ? '—' : stats?.active_patients ?? 0}</div>
+          <div className="stat-lbl">Active Patients</div>
         </div>
       </div>
 
+
+      {!loading && analytics && (
+        <div className="card" style={{marginBottom:'20px'}}>
+          <div className="section-label mb-12">Practice analytics</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(130px, 1fr))',gap:'12px'}}>
+            <div><div className="stat-val">{analytics.completed_visits}</div><div className="stat-lbl">Completed visits</div></div>
+            <div><div className="stat-val">{analytics.submitted_visits}</div><div className="stat-lbl">Submitted visits</div></div>
+            <div><div className="stat-val teal">{analytics.confirmed_procedures}</div><div className="stat-lbl">Confirmed procedures</div></div>
+            <div><div className="stat-val">{analytics.note_approval_rate}%</div><div className="stat-lbl">Notes approved</div></div>
+          </div>
+        </div>
+      )}
+      {reviewTasks.length > 0 && (
+        <div className="card" style={{marginBottom:'20px'}}>
+          <div className="section-label mb-12">Review tasks</div>
+          {reviewTasks.slice(0, 6).map((task, index) => <button key={index} onClick={() => router.push('/dashboard/chart?patientId=' + task.patient_id + '&sessionId=' + task.session_id)} style={{display:'flex',width:'100%',justifyContent:'space-between',gap:'12px',padding:'10px 0',border:'none',borderBottom:'1px solid var(--border)',background:'transparent',cursor:'pointer',textAlign:'left'}}><span><strong>{task.patient_name}</strong> · {task.task}</span><span style={{color:'var(--teal-dark)'}}>Review →</span></button>)}
+        </div>
+      )}
       <div style={{display:'grid',gridTemplateColumns:'1fr',gap:'20px'}}>
         <div>
-          <div className="section-label mb-12">Today&apos;s Schedule</div>
+          <div className="section-label mb-12">Recent Activity</div>
           <div style={{display:'grid',gap:'12px',gridTemplateColumns:'1fr'}}>
-            {[
-              {initials:'SJ',name:'Sarah Johnson',meta:'Routine check-up · Chair #3',badge:'badge-teal',badgeText:'✓ Charted',time:'9:00',ampm:'AM',bg:'#E8F8F7',color:'#35a092'},
-              {initials:'MT',name:'Marcus Torres',meta:'Perio maintenance · Chair #1',badge:'badge-warn',badgeText:'⬤ In Progress',time:'10:30',ampm:'AM',bg:'#EBF3FE',color:'#2a4f8a',active:true},
-              {initials:'LN',name:'Lisa Nguyen',meta:'Composite filling · Chair #2',badge:'badge-gray',badgeText:'Upcoming',time:'12:00',ampm:'PM',bg:'#FEF3E2',color:'#A0560A'},
-              {initials:'RP',name:'Robert Park',meta:'Crown prep · Chair #4',badge:'badge-gray',badgeText:'Upcoming',time:'2:00',ampm:'PM',bg:'#FEEEEE',color:'#A03030'},
-            ].map((p) => (
-              <div 
-                key={p.name} 
-                className={`patient-card${p.active?' active-visit':''}`}
-                onClick={() => handlePatientClick(p.name)}
-                style={{ cursor: 'pointer' }}
-              >
-                <div className="patient-avatar" style={{background:p.bg,color:p.color}}>{p.initials}</div>
-                <div style={{flex:1,minWidth:0}}>
-                  <div className="patient-name">{p.name}</div>
-                  <div className="patient-meta">{p.meta}</div>
-                  <div className="mt-4"><span className={`badge ${p.badge}`}>{p.badgeText}</span></div>
-                </div>
-                <div className="patient-time">
-                  <div className="patient-time-val">{p.time}</div>
-                  <div className="mt-4 text-muted" style={{fontSize:'10px'}}>{p.ampm}</div>
-                </div>
+            {!loading && stats && stats.recent_sessions.length === 0 && (
+              <div style={{fontSize:'12px',color:'var(--ink3)',fontStyle:'italic',padding:'12px 0'}}>
+                No recordings yet — start one from a patient&apos;s page.
               </div>
-            ))}
+            )}
+            {stats?.recent_sessions.map((s) => {
+              const badge = statusBadge(s.status);
+              const initials = s.patient_name.split(' ').map(p => p[0]).join('').toUpperCase().slice(0, 2);
+              return (
+                <div
+                  key={`${s.patient_id}-${s.created_at}`}
+                  className="patient-card"
+                  onClick={() => handleSessionClick(router, s)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div className="patient-avatar">{initials}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div className="patient-name">{s.patient_name}</div>
+                    <div className="mt-4"><span className={`badge ${badge.className}`}>{badge.text}</span></div>
+                  </div>
+                  <div className="patient-time">
+                    <div className="mt-4 text-muted" style={{fontSize:'10px'}}>{timeAgo(s.created_at)}</div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
-        <div>
-          <div className="section-label mb-12">Revenue Flags</div>
-          <div className="alert-card warn">
-            <div className="alert-icon warn">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            </div>
-            <div>
-              <div className="alert-title warn">Missed D4910 — Marcus Torres</div>
-              <div className="alert-text">Perio maintenance billable but not coded in Feb visit. Est. recovery: $148</div>
+        {!loading && stats && (stats.pending_review > 0 || stats.revenue_suggested > 0) && (
+          <div>
+            <div className="section-label mb-12">Billing Summary</div>
+            <div className="revenue-flag">
+              <div className="revenue-label">Suggested Revenue Pending Review</div>
+              <div className="revenue-amount">${stats.revenue_suggested}</div>
+              <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'4px'}}>{stats.pending_review} visit{stats.pending_review === 1 ? '' : 's'} with AI-suggested CDT codes</div>
               <div className="mt-8">
-                <button 
-                  className="btn-sm btn-teal"
-                  onClick={() => router.push('/dashboard/chart')}
-                >
-                  Review →
-                </button>
+                <button className="btn-sm btn-teal" onClick={() => router.push('/dashboard/billing')}>Review →</button>
               </div>
             </div>
           </div>
-          <div className="alert-card">
-            <div className="alert-icon">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-            </div>
-            <div>
-              <div className="alert-title">D1330 underbilled × 6 visits</div>
-              <div className="alert-text">OHI delivered but not coded across 6 visits this month. Est. recovery: $174</div>
-              <div className="mt-8">
-                <button 
-                  className="btn-sm btn-teal"
-                  onClick={() => router.push('/dashboard/billing')}
-                >
-                  Review →
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="revenue-flag mt-12">
-            <div className="revenue-label">Total Recoverable — April</div>
-            <div className="revenue-amount">$840</div>
-            <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'4px'}}>3 flagged procedures · 2 patients</div>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
