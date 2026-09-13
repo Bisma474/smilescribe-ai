@@ -160,6 +160,7 @@ export interface ClinicalSession {
   medications_allergies?: any;
   follow_up_draft?: any;
   audit_timeline?: AuditTimelineEvent[];
+  patient_summary?: any;
   created_at: string;
 }
 
@@ -236,6 +237,8 @@ export const workflowApi = {
     request<ClinicalSession>('/workflow/session/' + sessionId + '/confirmed-procedures', { method: 'PUT', body: JSON.stringify(procedures) }),
   timeline: (sessionId: number) =>
     request<AuditTimelineEvent[]>("/workflow/session/" + sessionId + "/timeline"),
+  generatePatientSummary: (sessionId: number) =>
+    request<ClinicalSession>("/workflow/session/" + sessionId + "/generate-patient-summary", { method: "POST" }),
 };
 
 export const logsApi = {

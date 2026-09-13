@@ -79,6 +79,8 @@ function ChartContent() {
   const [summaryReport, setSummaryReport] = useState<SummaryReport | null>(null);
   const [aiNote, setAiNote] = useState<any>({ status: 'draft', sections: {} });
   const [auditTimeline, setAuditTimeline] = useState<AuditTimelineEvent[]>([]);
+  const [patientSummary, setPatientSummary] = useState<any>({ status: 'draft', sections: {} });
+  const [patientSummarySaving, setPatientSummarySaving] = useState(false);
   const [noteSaving, setNoteSaving] = useState(false);
   const [hoveredQuote, setHoveredQuote] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -147,6 +149,7 @@ function ChartContent() {
         setSummaryReport((session.summary_report as SummaryReport) || null);
         setAiNote(session.ai_note || { status: 'draft', sections: { chief_complaint: '', findings: '', assessment: '', plan: '', instructions: '' } });
         setAuditTimeline(await workflowApi.timeline(session.id));
+        setPatientSummary(session.patient_summary || { status: 'draft', sections: {} });
         setDiarizationStatus(session.diarization_status || 'not_run');
         setSpeakersSwapped(!!session.speakers_swapped);
 
@@ -841,6 +844,23 @@ function ChartContent() {
               </div>
 
 
+              <div className="card" style={{padding:'18px',marginBottom:'16px'}}>
+                <div style={{fontSize:'15px',fontWeight:700,color:'var(--navy)',marginBottom:'6px'}}>Patient-friendly after-visit summary</div>
+                <div style={{fontSize:'12px',color:'var(--ink3)',marginBottom:'12px'}}>Plain-language draft. Review and approve it before sharing with the patient.</div>
+                {['visit_summary','care_instructions','when_to_contact'].map(section => (
+                  <label key={section} style={{display:'block',fontSize:'11px',fontWeight:700,textTransform:'capitalize',color:'var(--ink3)',marginTop:'9px'}}>
+                    {section.replaceAll('_', ' ')}
+                    <textarea className="form-input" value={patientSummary.sections?.[section] || ''} onChange={e => setPatientSummary({...patientSummary, status:'draft', sections:{...patientSummary.sections,[section]:e.target.value}})} style={{width:'100%',minHeight:'56px',marginTop:'4px'}} />
+                  </label>
+                ))}
+                <div style={{fontSize:'11px',fontWeight:700,textTransform:'uppercase',color:'var(--ink3)',marginTop:'10px'}}>Next steps</div>
+                <textarea className="form-input" value={(patientSummary.sections?.next_steps || []).join('\n')} onChange={e => setPatientSummary({...patientSummary, status:'draft', sections:{...patientSummary.sections,next_steps:e.target.value.split('\n').filter(Boolean)}})} style={{width:'100%',minHeight:'54px',marginTop:'4px'}} />
+                <div style={{display:'flex',gap:'8px',marginTop:'12px'}}>
+                  <button className="btn-sm btn-ghost" disabled={patientSummarySaving || !sessionId} onClick={async () => { if (!sessionId) return; setPatientSummarySaving(true); try { const updated = await workflowApi.generatePatientSummary(sessionId); setPatientSummary(updated.patient_summary || patientSummary); setAuditTimeline(await workflowApi.timeline(sessionId)); } finally { setPatientSummarySaving(false); } }}>{patientSummarySaving ? 'Generating...' : 'Generate draft'}</button>
+                  <button className="btn-sm btn-ghost" disabled={patientSummarySaving || !sessionId} onClick={async () => { if (!sessionId) return; setPatientSummarySaving(true); try { await sessionsApi.update(sessionId, { patient_summary: {...patientSummary, status:'draft'} }); } finally { setPatientSummarySaving(false); } }}>Save draft</button>
+                  <button className="btn-sm btn-teal" disabled={patientSummarySaving || !sessionId} onClick={async () => { if (!sessionId) return; setPatientSummarySaving(true); try { const summary={...patientSummary,status: patientSummary.status === 'approved' ? 'draft' : 'approved'}; await sessionsApi.update(sessionId,{patient_summary:summary}); setPatientSummary(summary); } finally { setPatientSummarySaving(false); } }}>{patientSummary.status === 'approved' ? 'Reopen draft' : 'Approve summary'}</button>
+                </div>
+              </div>
               <div className="card" style={{padding:'18px'}}>
                 <div style={{fontSize:'15px',fontWeight:700,color:'var(--navy)',marginBottom:'10px'}}>Visit activity</div>
                 {auditTimeline.length === 0 ? (

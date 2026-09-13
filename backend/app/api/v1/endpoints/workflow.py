@@ -9,6 +9,7 @@ from app.services.ai_note_service import generate_visit_note
 from app.services.follow_up_service import build_follow_up_draft
 from app.services.risk_flag_service import derive_risk_flags
 from app.services.audit_timeline_service import append_audit_event
+from app.services.patient_summary_service import build_patient_summary
 
 router = APIRouter()
 
@@ -116,3 +117,12 @@ def risk_flags(session_id: int, db: Session = Depends(get_db), current_user: Use
 def audit_timeline(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     session = _owned_session(db, session_id, current_user)
     return session.audit_timeline or []
+
+@router.post("/session/{session_id}/generate-patient-summary")
+def generate_patient_summary(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    session = _owned_session(db, session_id, current_user)
+    session.patient_summary = build_patient_summary(session.ai_note or {}, session.follow_up_draft or {}, session.treatment_opportunities or [])
+    append_audit_event(session, "patient_summary_generated", "Generated a patient-friendly after-visit summary draft.")
+    db.commit()
+    db.refresh(session)
+    return session
