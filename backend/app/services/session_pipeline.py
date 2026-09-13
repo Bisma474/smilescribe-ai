@@ -18,6 +18,7 @@ from app.services.chart_extraction_service import extract_chart
 from app.services.chart_mapping import build_summary_report, build_workflow_items, map_findings_to_clinical_entries
 from app.services.diarization_service import DiarizationUnavailable, diarize_audio, merge_with_transcript
 from app.services.speaker_label_service import label_transcript_roles
+from app.services.medication_extraction_service import extract_medications_allergies
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,7 @@ def process_recording(session_id: int, job_token: str, audio_bytes: bytes, filen
             # Clinical extraction uses Whisper's untouched text. Labeling is
             # only a display aid and must never alter clinical evidence.
             findings = extract_chart(plain_transcript)
+            medications_allergies = extract_medications_allergies(plain_transcript)
             clinical_entries = map_findings_to_clinical_entries(findings)
             treatment_opportunities, candidate_procedures = build_workflow_items(clinical_entries)
             summary_report = build_summary_report(clinical_entries, candidate_procedures)
@@ -171,6 +173,7 @@ def process_recording(session_id: int, job_token: str, audio_bytes: bytes, filen
             session.treatment_opportunities = treatment_opportunities
             session.candidate_procedures = candidate_procedures
             session.clinician_confirmed_procedures = []
+            session.medications_allergies = medications_allergies
             session.status = "complete"
             session.error_message = None
             db.commit()
