@@ -6,9 +6,13 @@ from typing import Any
 
 CATALOG = [
     {"code": "D0150", "description": "Comprehensive oral evaluation", "fee": 85, "requires": []},
+    {"code": "D0120", "description": "Periodic oral evaluation - established patient", "fee": 65, "requires": []},
+    {"code": "D0180", "description": "Comprehensive periodontal evaluation", "fee": 120, "requires": []},
     {"code": "D0140", "description": "Limited oral evaluation - problem focused", "fee": 75, "requires": []},
     {"code": "D1110", "description": "Prophylaxis - adult", "fee": 95, "requires": []},
     {"code": "D0274", "description": "Bitewing radiographs", "fee": 65, "requires": []},
+    {"code": "D0210", "description": "Intraoral complete series of radiographs", "fee": 150, "requires": []},
+    {"code": "D0330", "description": "Panoramic radiographic image", "fee": 110, "requires": []},
     {"code": "D1330", "description": "Oral hygiene instruction", "fee": 29, "requires": []},
     {"code": "D1206", "description": "Topical fluoride varnish", "fee": 48, "requires": []},
     {"code": "D2391", "description": "Resin-based composite restoration, one surface", "fee": 165, "requires": ["tooth", "surface"]},

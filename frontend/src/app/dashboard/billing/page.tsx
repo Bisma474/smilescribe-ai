@@ -322,7 +322,7 @@ function BillingContent() {
               <div style={{fontSize:'13px',fontWeight:700,color:'var(--navy)',marginBottom:'8px'}}>Add completed service</div>
               <div style={{fontSize:'11px',color:'var(--ink3)',marginBottom:'10px'}}>Select only work completed during this visit.</div>
               <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
-                {[['D0150','Comprehensive exam',85],['D1110','Prophylaxis',95],['D0274','Bitewing x-rays',65],['D1206','Fluoride varnish',48],['D1330','Oral hygiene instruction',29]].map(([code,desc,fee]) => <button key={String(code)} className="btn-sm btn-ghost" disabled={codingSaving} onClick={() => addCommonProcedure({code,description:desc,fee,status:'confirmed'})}>{desc}</button>)}
+                {[['D0150','Comprehensive exam',85],['D0120','Periodic exam',65],['D0140','Problem-focused exam',75],['D0180','Comprehensive periodontal evaluation',120],['D1110','Prophylaxis',95],['D0274','Bitewing x-rays',65],['D0210','Full-mouth x-rays',150],['D0330','Panoramic x-ray',110],['D1206','Fluoride varnish',48],['D1330','Oral hygiene instruction',29]].map(([code,desc,fee]) => <button key={String(code)} className="btn-sm btn-ghost" disabled={codingSaving} onClick={() => addCommonProcedure({code,description:desc,fee,status:'confirmed'})}>{desc}</button>)}
               </div>
               {confirmedProcedures.length > 0 && <div style={{marginTop:'12px',fontSize:'12px',color:'var(--teal-dark)'}}>{confirmedProcedures.map(item => item.code + ' · ' + item.description).join('  |  ')}</div>}
             </div>
