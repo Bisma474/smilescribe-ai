@@ -7,6 +7,7 @@ from app.models.user import User
 from app.services.coding_service import search_catalog, validate_confirmed_procedure
 from app.services.ai_note_service import generate_visit_note
 from app.services.follow_up_service import build_follow_up_draft
+from app.services.risk_flag_service import derive_risk_flags
 
 router = APIRouter()
 
@@ -102,3 +103,7 @@ def compare_visits(session_id: int, db: Session = Depends(get_db), current_user:
         "resolved_findings": [item for item in (previous.clinical_entries or []) if str(item.get("label") or "") not in current_labels],
         "perio_change": "Compare periodontal measurements in the selected visit charts.",
     }
+@router.get("/session/{session_id}/risk-flags")
+def risk_flags(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    session = _owned_session(db, session_id, current_user)
+    return derive_risk_flags(session.clinical_entries or [], session.medications_allergies or {})
