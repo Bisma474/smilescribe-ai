@@ -86,11 +86,11 @@ vi.mock('@/lib/apiClient', async (importOriginal) => {
 });
 
 import LoginPage from '../components/features/auth/LoginPage';
-import PatientsPage from '../app/dashboard/patients/page.tsx';
-import BillingPage from '../app/dashboard/billing/page.tsx';
-import ChartPage from '../app/dashboard/chart/page.tsx';
-import SettingsPage from '../app/dashboard/settings/page.tsx';
-import DashboardPage from '../app/dashboard/page.tsx';
+import PatientsPage from '../app/dashboard/patients/page';
+import BillingPage from '../app/dashboard/billing/page';
+import ChartPage from '../app/dashboard/chart/page';
+import SettingsPage from '../app/dashboard/settings/page';
+import DashboardPage from '../app/dashboard/page';
 import TopBar from '../components/layout/TopBar';
 
 describe('🔒 DentalScribeAI — Aggressive Frontend Unit Test Suite', () => {
