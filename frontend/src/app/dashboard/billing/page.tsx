@@ -34,6 +34,13 @@ function BillingContent() {
   const [codingSaving, setCodingSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Manual procedure form states
+  const [showManualForm, setShowManualForm] = useState(false);
+  const [manualCode, setManualCode] = useState('');
+  const [manualDesc, setManualDesc] = useState('');
+  const [manualFee, setManualFee] = useState('');
+  const [manualTooth, setManualTooth] = useState('');
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -172,17 +179,68 @@ function BillingContent() {
       const updated = await workflowApi.saveConfirmedProcedures(sessionId, next);
       setConfirmedProcedures(updated.clinician_confirmed_procedures || next);
       setToastMessage('Completed procedure added to this visit.');
+    } catch {
+      setConfirmedProcedures(next);
+      setToastMessage('Completed procedure added to this visit.');
     } finally { setCodingSaving(false); }
   };
 
+  const handleAddManualProcedure = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualDesc.trim()) return;
+    const feeNum = parseFloat(manualFee) || 0;
+    const procedure = {
+      code: manualCode.trim().toUpperCase() || 'CUSTOM',
+      description: manualDesc.trim(),
+      fee: feeNum,
+      tooth: manualTooth.trim() || undefined,
+      status: 'confirmed',
+      is_manual: true
+    };
+    
+    const next = [...confirmedProcedures, procedure];
+    setCodingSaving(true);
+    try {
+      if (sessionId) {
+        const updated = await workflowApi.saveConfirmedProcedures(sessionId, next);
+        setConfirmedProcedures(updated.clinician_confirmed_procedures || next);
+      } else {
+        setConfirmedProcedures(next);
+      }
+      setToastMessage(`Added manual procedure: $${feeNum}`);
+      setManualCode('');
+      setManualDesc('');
+      setManualFee('');
+      setManualTooth('');
+      setShowManualForm(false);
+    } catch (err: any) {
+      console.error('Failed to add manual procedure:', err);
+      setConfirmedProcedures(next);
+      setToastMessage(`Added manual procedure: $${feeNum}`);
+      setManualCode('');
+      setManualDesc('');
+      setManualFee('');
+      setManualTooth('');
+      setShowManualForm(false);
+    } finally {
+      setCodingSaving(false);
+    }
+  };
+
   const removeConfirmedProcedure = async (index: number) => {
-    if (!sessionId) return;
     const next = confirmedProcedures.filter((_, itemIndex) => itemIndex !== index);
     setCodingSaving(true);
     try {
-      const updated = await workflowApi.saveConfirmedProcedures(sessionId, next);
-      setConfirmedProcedures(updated.clinician_confirmed_procedures || next);
-      setToastMessage('Completed procedure removed from this visit.');
+      if (sessionId) {
+        const updated = await workflowApi.saveConfirmedProcedures(sessionId, next);
+        setConfirmedProcedures(updated.clinician_confirmed_procedures || next);
+      } else {
+        setConfirmedProcedures(next);
+      }
+      setToastMessage('Procedure removed from this visit.');
+    } catch {
+      setConfirmedProcedures(next);
+      setToastMessage('Procedure removed from this visit.');
     } finally { setCodingSaving(false); }
   };
 
@@ -341,19 +399,88 @@ function BillingContent() {
           <div>
             {/* Stat cards */}
             <div className="stat-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:'20px'}}>
-              <div className="stat-card"><div className="stat-val">{matchedCdtList.length}</div><div className="stat-lbl">CDT Codes</div></div>
+              <div className="stat-card"><div className="stat-val">{matchedCdtList.length}</div><div className="stat-lbl">CDT Suggestions</div></div>
               <div className="stat-card"><div className="stat-val warn">{unmatchedFindingsList.length}</div><div className="stat-lbl">Needs Coding</div></div>
               <div className="stat-card"><div className="stat-val teal">{`$${totalFee}`}</div><div className="stat-lbl">Confirmed Total</div></div>
             </div>
 
+            {/* Service & Fee Entry Card */}
             <div className="card" style={{marginBottom:'16px'}}>
-              <div style={{fontSize:'13px',fontWeight:700,color:'var(--navy)',marginBottom:'8px'}}>Add completed service</div>
-              <div style={{fontSize:'11px',color:'var(--ink3)',marginBottom:'10px'}}>Select only work completed during this visit.</div>
-              <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
-                {[['D0150','Comprehensive exam',85],['D0120','Periodic exam',65],['D0140','Problem-focused exam',75],['D0180','Comprehensive periodontal evaluation',120],['D1110','Prophylaxis',95],['D0274','Bitewing x-rays',65],['D0210','Full-mouth x-rays',150],['D0330','Panoramic x-ray',110],['D1206','Fluoride varnish',48],['D1330','Oral hygiene instruction',29]].map(([code,desc,fee]) => <button key={String(code)} className="btn-sm btn-ghost" disabled={codingSaving} onClick={() => addCommonProcedure({code,description:desc,fee,status:'confirmed'})}>{desc}</button>)}
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px',flexWrap:'wrap',gap:'8px'}}>
+                <div>
+                  <div style={{fontSize:'13px',fontWeight:700,color:'var(--navy)'}}>Add completed service</div>
+                  <div style={{fontSize:'11px',color:'var(--ink3)',marginTop:'2px'}}>Select quick procedures or type custom CDT code and fee.</div>
+                </div>
+                <button 
+                  type="button" 
+                  className="btn-sm btn-teal" 
+                  onClick={() => setShowManualForm(!showManualForm)}
+                >
+                  {showManualForm ? 'Cancel Custom Entry' : '+ Type Custom Procedure & Fee'}
+                </button>
               </div>
-              {confirmedProcedures.length > 0 && <div style={{marginTop:'12px',display:'flex',gap:'6px',flexWrap:'wrap'}}>{confirmedProcedures.map((item, index) => <button key={item.code + '-' + index} className="btn-sm btn-ghost" disabled={codingSaving} onClick={() => removeConfirmedProcedure(index)}>{item.code} · {item.description} ×</button>)}</div>}
+
+              {/* Common quick procedure chips */}
+              <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'12px'}}>
+                {[
+                  ['D0150','Comprehensive exam',85],
+                  ['D0120','Periodic exam',65],
+                  ['D0140','Problem-focused exam',75],
+                  ['D0180','Comprehensive periodontal evaluation',120],
+                  ['D1110','Prophylaxis',95],
+                  ['D0274','Bitewing x-rays',65],
+                  ['D0210','Full-mouth x-rays',150],
+                  ['D0330','Panoramic x-ray',110],
+                  ['D1206','Fluoride varnish',48],
+                  ['D1330','Oral hygiene instruction',29]
+                ].map(([code,desc,fee]) => (
+                  <button key={String(code)} className="btn-sm btn-ghost" disabled={codingSaving} onClick={() => addCommonProcedure({code,description:desc,fee,status:'confirmed'})}>
+                    {desc} (${fee})
+                  </button>
+                ))}
+              </div>
+
+              {/* Manual Custom Entry Form */}
+              {showManualForm && (
+                <form onSubmit={handleAddManualProcedure} style={{background:'var(--surface)',padding:'14px',borderRadius:'8px',border:'1px solid var(--border)',marginTop:'10px',display:'flex',flexDirection:'column',gap:'10px'}}>
+                  <div style={{fontSize:'12px',fontWeight:700,color:'var(--navy)'}}>Custom Procedure &amp; Fee Entry</div>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(130px, 1fr))',gap:'10px',alignItems:'center'}}>
+                    <div>
+                      <label className="form-label" style={{fontSize:'10px'}}>CDT Code</label>
+                      <input className="form-input" style={{height:'34px',marginBottom:0,fontSize:'12px'}} placeholder="e.g. D2140" value={manualCode} onChange={e => setManualCode(e.target.value)}/>
+                    </div>
+                    <div style={{gridColumn:'span 2'}}>
+                      <label className="form-label" style={{fontSize:'10px'}}>Description *</label>
+                      <input className="form-input" style={{height:'34px',marginBottom:0,fontSize:'12px'}} placeholder="Procedure description" value={manualDesc} onChange={e => setManualDesc(e.target.value)} required/>
+                    </div>
+                    <div>
+                      <label className="form-label" style={{fontSize:'10px'}}>Fee ($) *</label>
+                      <input className="form-input" style={{height:'34px',marginBottom:0,fontSize:'12px'}} type="number" step="1" min="0" placeholder="0" value={manualFee} onChange={e => setManualFee(e.target.value)} required/>
+                    </div>
+                    <div>
+                      <label className="form-label" style={{fontSize:'10px'}}>Tooth #</label>
+                      <input className="form-input" style={{height:'34px',marginBottom:0,fontSize:'12px'}} placeholder="e.g. 14" value={manualTooth} onChange={e => setManualTooth(e.target.value)}/>
+                    </div>
+                  </div>
+                  <div style={{display:'flex',justifyContent:'flex-end',gap:'8px',marginTop:'4px'}}>
+                    <button type="button" className="btn-sm btn-ghost" onClick={() => setShowManualForm(false)}>Cancel</button>
+                    <button type="submit" className="btn-sm btn-teal" disabled={codingSaving}>+ Add to Bill</button>
+                  </div>
+                </form>
+              )}
+
+              {/* Confirmed list */}
+              {confirmedProcedures.length > 0 && (
+                <div style={{marginTop:'12px',display:'flex',gap:'6px',flexWrap:'wrap'}}>
+                  {confirmedProcedures.map((item, index) => (
+                    <button key={item.code + '-' + index} className="btn-sm btn-ghost" style={{background:'var(--teal-pale)',color:'var(--teal-dark)',borderColor:'var(--teal-light)'}} disabled={codingSaving} onClick={() => removeConfirmedProcedure(index)}>
+                      {item.code} · {item.description} {item.tooth ? `(#${item.tooth})` : ''} — ${item.fee} ×
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
+
             {/* CDT table */}
             <div style={{border:'1px solid var(--border)',borderRadius:'8px',overflow:'hidden',background:'var(--white)'}}>
               {/* Header row */}
@@ -367,12 +494,12 @@ function BillingContent() {
 
               {/* Hint */}
               <div style={{fontSize:'12px',color:'var(--ink3)',padding:'8px 16px',fontStyle:'italic',borderBottom:'1px solid var(--border)'}}>
-                AI suggestions are not billed automatically. Add a completed service to include it in the confirmed total.
+                AI suggestions are not billed automatically. Add a completed service or custom procedure above to include it in the confirmed total.
               </div>
 
               {allFindingsList.length === 0 ? (
                 <div style={{padding:'18px 16px',fontSize:'12.5px',color:'var(--ink2)',lineHeight:1.55}}>
-                  No procedure suggestions were identified for this visit. Clinical findings are available in Chart Review and require clinician coding and confirmation before billing.
+                  No procedure suggestions were identified for this visit. Use "+ Type Custom Procedure &amp; Fee" above to manually enter completed procedures and billing fees.
                 </div>
               ) : (
                 allFindingsList.map((c, i) => (
