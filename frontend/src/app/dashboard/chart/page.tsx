@@ -847,6 +847,15 @@ function ChartContent() {
               <div style={{fontSize:'10px',fontWeight:700,color:'var(--teal-dark)',background:'var(--teal-pale)',borderRadius:'20px',padding:'3px 10px'}}>↔ Bidirectional</div>
             </div>
           </div>
+          {activeTab === 'transcript' && (
+            <div style={{padding:'12px',borderBottom:'1px solid var(--border)',background:'var(--white)',display:'flex',gap:'8px',flexWrap:'wrap'}}>
+              {clinicalEntries.map((entry, index) => {
+                const quote = entry.segments?.[0]?.quote || '';
+                const active = hoveredQuote === quote;
+                return <button key={index} onMouseEnter={() => quote && setHoveredQuote(quote)} onMouseLeave={() => setHoveredQuote(null)} style={{border:active ? '1px solid var(--teal)' : '1px solid var(--border)',background:active ? 'var(--teal-pale)' : 'var(--surface)',borderRadius:'8px',padding:'7px 10px',cursor:'pointer',fontSize:'11px',color:'var(--navy)',textAlign:'left'}}>{entry.tooth} · {entry.label}</button>;
+              })}
+            </div>
+          )}
           <div style={{padding:'7px 12px',fontSize:'10px',color:'var(--ink3)',background:'var(--teal-xpale)',borderBottom:'1px solid var(--border)',lineHeight:1.4}}>
             Hover a clinical entry to highlight supporting sentences below · Hover supporting sentences to highlight clinical entries
           </div>
@@ -873,7 +882,7 @@ function ChartContent() {
           <div style={{flex:1,overflowY:'auto',padding:'8px 0',maxHeight:activeTab === 'transcript' ? 'calc(100vh - 290px)' : '400px'}}>
             <div style={{padding:'8px 16px',fontSize:'12.5px',color:'var(--ink)',lineHeight:1.7}}>
               {splitTranscriptTurns(transcript).map((turn, index, turns) => (
-                <div key={turn.speaker + '-' + index} style={{padding:'8px 0',borderBottom:index === turns.length - 1 ? 'none' : '1px solid rgba(27,58,107,0.08)'}}>
+                <div key={turn.speaker + '-' + index} onMouseEnter={() => { const entry = clinicalEntries.find(item => item.segments?.[0]?.quote && turn.text.includes(item.segments[0].quote)); if (entry?.segments?.[0]?.quote) setHoveredQuote(entry.segments[0].quote); }} onMouseLeave={() => setHoveredQuote(null)} style={{padding:'8px 0',borderBottom:index === turns.length - 1 ? 'none' : '1px solid rgba(27,58,107,0.08)',cursor:'default'}}>
                   {turn.speaker && (
                     <span style={{display:'inline-block',minWidth:'62px',marginRight:'8px',fontSize:'10px',fontWeight:800,letterSpacing:'0.06em',color:turn.speaker === 'Dentist' ? 'var(--teal-dark)' : 'var(--navy-mid)'}}>
                       {turn.speaker.toUpperCase()}
