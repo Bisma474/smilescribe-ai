@@ -755,8 +755,9 @@ function ChartContent() {
                   </label>
                 ))}
                 <div style={{display:'flex',gap:'8px',marginTop:'14px'}}>
-                  <button className="btn-sm btn-ghost" disabled={noteSaving} onClick={async () => { if (!sessionId) return; setNoteSaving(true); await sessionsApi.update(sessionId, { ai_note: {...aiNote, status:'draft'} }); setNoteSaving(false); }}>Save Draft</button>
-                  <button className="btn-sm btn-teal" disabled={noteSaving} onClick={async () => { if (!sessionId) return; setNoteSaving(true); const note={...aiNote,status:'approved'}; await sessionsApi.update(sessionId,{ai_note:note}); setAiNote(note); setNoteSaving(false); }}>Approve Note</button>
+                  <button className="btn-sm btn-ghost" disabled={noteSaving} onClick={async () => { if (!sessionId) return; setNoteSaving(true); try { const updated = await sessionsApi.generateAiNote(sessionId); setAiNote(updated.ai_note || aiNote); } finally { setNoteSaving(false); } }}>{noteSaving ? 'Generating...' : 'Generate AI Note'}</button>
+                  <button className="btn-sm btn-ghost" disabled={noteSaving} onClick={async () => { if (!sessionId) return; setNoteSaving(true); try { await sessionsApi.update(sessionId, { ai_note: {...aiNote, status:'draft'} }); } finally { setNoteSaving(false); } }}>Save Draft</button>
+                  <button className="btn-sm btn-teal" disabled={noteSaving || aiNote.status === 'approved'} onClick={async () => { if (!sessionId) return; setNoteSaving(true); try { const note={...aiNote,status:'approved'}; await sessionsApi.update(sessionId,{ai_note:note}); setAiNote(note); } finally { setNoteSaving(false); } }}>{aiNote.status === 'approved' ? 'Approved' : 'Approve Note'}</button>
                 </div>
               </div>
             </div>
