@@ -1,252 +1,174 @@
-# DentalScribeAI 🦷
+# DentalScribeAI
 
-AI-powered dental transcription, real-time periodontal charting, and automated billing assistant with vectorless RAG context linking and HIPAA-compliant audit trails.
+**AI assisted dental visit documentation and clinical review**
 
----
+DentalScribeAI is an end of internship full stack project connecting a Next.js practice dashboard to a FastAPI processing pipeline. A clinician can manage patients, record visits, review speaker labeled transcripts, inspect evidence for extracted findings, edit charts, and confirm procedure codes. The application also provides visit notes, follow up drafts, patient summaries, risk flags, analytics, and audit history.
 
-## 🏗️ System Architecture
+> **Clinical use:** AI output is a draft for professional review. A qualified clinician must verify findings, notes, and codes before use in care or billing. Access controls and audit features alone do not establish HIPAA compliance.
 
-The following diagram illustrates the end-to-end architecture of DentalScribeAI, including the relationship between the Next.js frontend client, the FastAPI backend services, the relational storage, and the external cloud API integrations.
+## Technology
+
+| Layer | Stack |
+| --- | --- |
+| Frontend | Next.js 16, React 19, TypeScript, CSS |
+| API | FastAPI, Pydantic, SQLAlchemy |
+| Identity and data | Supabase Auth and PostgreSQL |
+| AI | Groq speech recognition and language model APIs |
+| Optional context | PageIndex document queries |
+| Optional diarization | pyannote.audio, Hugging Face, FFmpeg |
+| Tests | Vitest, React Testing Library, pytest, FastAPI TestClient |
+| Deployment configuration | Vercel frontend; Render or Docker backend |
+
+## Features
+
+- **Patient and visit management:** Create and search patients, view visit history, and start a recording for a selected patient.
+- **Audio processing:** Upload audio to a background job, transcribe speech, and label dentist and patient turns. Reviewers can swap incorrect speaker labels.
+- **Evidence linked extraction:** Extract clinical findings with supporting transcript excerpts and offsets, validate tooth numbers, and process long transcripts in chunks.
+- **Clinical review:** Edit chart entries, generate a visit note, review medication and allergy information and risk flags, compare visits, and prepare follow up and patient summary drafts.
+- **Coding and billing:** Search a CDT catalog, inspect suggested procedures, confirm or edit codes, and review billing details.
+- **Practice oversight:** Dashboard statistics, review tasks, analytics, settings, audit logs, and session timeline.
+- **Standalone review:** The `/review` workspace supports demo transcript, transcription, PageIndex queries, and chart extraction.
+
+## Architecture
 
 ```mermaid
-flowchart TB
-    %% Nodes and connections for Frontend
-    subgraph FE [Frontend - Next.js 16 / React 19]
-        direction LR
-        UI["Interactive UI Pages<br>(/poc, /dashboard, /chart, /billing, /patients, /settings)"]
-        Store["State Management<br>(AuthContext, localStorage)"]
-        Client["API Client<br>(apiClient.ts)"]
-        
-        UI <--> Store
-        UI --> Client
-    end
-
-    %% Connections from Frontend Client to Backend Router
-    Client ==>|"REST API Requests (JSON/Multipart)"| Router
-
-    %% Nodes and connections for Backend
-    subgraph BE [Backend - FastAPI]
-        Router["API Router<br>(/api/v1)"]
-        
-        subgraph Endpoints [Endpoints]
-            E_Auth["/auth"]
-            E_POC["/poc"]
-            E_Pat["/patients"]
-            E_Audit["/audit-logs"]
-        end
-        
-        subgraph Services [Services Layer]
-            ASR["ASR Service<br>(Groq Whisper Large v3)"]
-            Chart["Chart Extraction Service<br>(Llama-3.3-70b-versatile + Verification)"]
-            PI["PageIndex Service<br>(PageIndex SDK Client)"]
-        end
-        
-        subgraph Data [Data & DB Access Layer]
-            SQLA["SQLAlchemy Engine<br>(session.py)"]
-            Models["ORM Models<br>(User, Patient, Session, AuditLog)"]
-            Migrations["Supabase Migrations<br>(full_migration.sql)"]
-        end
-        
-        Router --> E_Auth
-        Router --> E_POC
-        Router --> E_Pat
-        Router --> E_Audit
-        
-        E_POC --> ASR
-        E_POC --> Chart
-        E_POC --> PI
-        
-        E_Auth --> SQLA
-        E_Pat --> SQLA
-        E_Audit --> SQLA
-        
-        SQLA <--> Models
-        SQLA <--> Migrations
-    end
-
-    %% External services
-    subgraph EXT [External Cloud Integrations]
-        GroqAPI["Groq Cloud API<br>(ASR & LLM Extraction)"]
-        PIC["PageIndex Cloud API<br>(Vectorless RAG Trees)"]
-        SupabaseDB["Supabase PostgreSQL<br>(Relational Storage)"]
-    end
-
-    ASR -->|"Audio Transcription"| GroqAPI
-    Chart -->|"JSON Chart Extraction"| GroqAPI
-    PI -->|"Context & Trees Retrieval"| PIC
-    SQLA -->|"TCP Pool Connection"| SupabaseDB
-
-    %% Styling
-    classDef feClass fill:#e1f5fe,stroke:#0288d1,stroke-width:2px,color:#01579b;
-    classDef beClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#4a148c;
-    classDef extClass fill:#efebe9,stroke:#5d4037,stroke-width:2px,color:#3e2723;
-    classDef endClass fill:#e8f5e9,stroke:#388e3c,stroke-width:2px,color:#1b5e20;
-    classDef svcClass fill:#fffde7,stroke:#fbc02d,stroke-width:2px,color:#f57f17;
-    classDef dbClass fill:#ffe0b2,stroke:#f57c00,stroke-width:2px,color:#e65100;
-    
-    class UI,Store,Client feClass;
-    class Router beClass;
-    class E_Auth,E_POC,E_Pat,E_Audit endClass;
-    class ASR,Chart,PI svcClass;
-    class SQLA,Models,Migrations dbClass;
-    class GroqAPI,PIC,SupabaseDB extClass;
+flowchart LR
+    U[Clinician] --> F[Next.js dashboard]
+    F --> A[FastAPI /api/v1]
+    F --> SA[Supabase Auth]
+    A --> DB[(Supabase PostgreSQL)]
+    A --> G[Groq APIs]
+    A --> P[PageIndex when configured]
+    A --> D[pyannote when configured]
 ```
 
----
+Backend routes live in `backend/app/api/v1/endpoints`; processing lives in `backend/app/services`; models and database access live in `backend/app/models` and `backend/app/db`. The frontend uses the Next.js App Router and a shared API client. Protected backend routes scope data access to the user's practice.
 
-## 🌟 Core Features
+## Repository structure
 
-1. **AI Dental Transcription (ASR)**: Voice recording is processed by Groq's Whisper API with a custom medical vocabulary prompt, ensuring dental jargon (CDT codes, surfaces, arches) is accurately transcribed.
-2. **Vectorless RAG (PageIndex)**: Traverses your hierarchical dental knowledge document index dynamically to match clinical context and fetch traversal pathways.
-3. **Smart Chart Extraction**: Converts transcript text into structured clinical findings (tooth number, surface, confidence) with verbatim quote validation (prevents LLM hallucinations by mapping exact offsets in the transcript).
-4. **Interactive Dental Workspaces**:
-   - **Perio Charting Editor**: Interactive Maxillary (Upper) and Mandibular (Lower) teeth arches for pockets depths (1mm - 10mm limits) and Bleeding on Probing (BOP) checkbox controls with real-time sync.
-   - **Citation Workspace**: Split-panel workspace where hovering over extracted chart findings highlights the exact supporting sentence in the transcript, and vice versa.
-   - **Billing & CDT Codes**: Automatically maps findings to CDT codes (e.g. D1330, D4910), flags underbilled procedures, and allows editing code list and totals before insurance claims.
-5. **HIPAA Compliance & Security**: Built-in encrypted access audit logging tracking all credentials, profile changes, patient accesses, settings updates, and claims submissions.
-
----
-
-## 🛠️ Tech Stack
-
-- **Frontend**: Next.js 16 (React 19), TypeScript, Vanilla CSS Design System.
-- **Backend**: FastAPI (Python), SQLAlchemy, PageIndex Python SDK, Groq Python SDK.
-- **Database**: Supabase PostgreSQL.
-- **Testing**: Vitest (Frontend), Pytest (Backend).
-
----
-
-## 📂 Project Structure
-
-```
-DentalScribeAI/
-├── backend/
-│   ├── app/
-│   │   ├── api/v1/          # FastAPI routes (auth, patients, poc, audit_logs)
-│   │   ├── core/            # Config settings and dependencies
-│   │   ├── db/              # SQLAlchemy session initialization
-│   │   ├── models/          # ORM models (User, Patient, Session, AuditLog)
-│   │   ├── schemas/         # Pydantic schemas (User, Patient, Session, AuditLog)
-│   │   ├── services/        # ASR, PageIndex RAG, and LLM Extraction services
-│   │   └── main.py          # App entrypoint & DB connection verified lifespan
-│   ├── tests/               # Pytest directories (unit, integration)
-│   ├── requirements.txt     # Python backend dependencies
-│   └── Dockerfile           # Backend container instructions
-├── frontend/
-│   ├── src/
-│   │   ├── __tests__/       # Comprehensive Vitest suite (LoginPage, Dashboard, Chart, etc.)
-│   │   ├── app/             # Next.js App Router pages (/poc, /dashboard, /settings)
-│   │   ├── components/      # Feature panels (CitationWorkspace, PageIndexPanel, TopBar)
-│   │   ├── lib/             # API client methods (authApi, patientsApi, logsApi)
-│   │   └── store/           # Global React Contexts (AuthContext)
-│   ├── package.json         # Scripts, React 19 dependencies, and Vitest setup
-│   ├── vitest.config.ts     # Vitest environment configurations (jsdom)
-│   └── Dockerfile           # Frontend container instructions
-├── supabase/
-│   └── full_migration.sql   # Database schemas, constraints, and initial seeds
-├── docker-compose.yml       # Docker orchestrator for development
-└── README.md
+```text
+backend/
+  app/api/v1/endpoints/   Auth, patients, transcription, notes, review, workflow, audit logs
+  app/services/           Speech, diarization, extraction, coding, notes, summaries
+  app/core/               Settings and authentication dependencies
+  app/db/, app/models/    Database connection and ORM models
+  app/schemas/            Request and response schemas
+  tests/                  Backend tests
+  .env.example            Backend environment template
+  render.yaml             Render service definition
+frontend/
+  src/app/                Login, dashboard, recording, chart, billing, patients, review
+  src/components/         Layout, authentication and evidence review
+  src/lib/                API and Supabase clients
+  src/store/              Authentication context
+  src/__tests__/          Frontend UI tests
+supabase/
+  migrations/             Ordered schema and feature migrations
+  full_migration.sql      Initial consolidated schema and demo data
+docs/                    Deployment, commands, context and planning notes
+docker-compose.yml       Local service outline
 ```
 
----
-
-## 🚀 Setup & Installation
+## Local setup
 
 ### Prerequisites
-- Python 3.10+ (via Miniconda or Anaconda is recommended)
-- Node.js 18+
-- Docker & Docker Compose (optional)
 
-### 1. Database Setup (Supabase)
-1. Create a project on [Supabase](https://supabase.com/).
-2. Navigate to **SQL Editor** in your Supabase dashboard and run the contents of [supabase/full_migration.sql](file:///d:/DentalScribeAI/supabase/full_migration.sql) to set up tables (`users`, `patients`, `sessions`, `chart_entries`, `billing_codes`, `hipaa_audit_logs`) and populate the initial dental practice profile and patient database.
+- Python 3.11 and Node.js/npm compatible with Next.js 16
+- A Supabase project with PostgreSQL and Auth
+- Groq credentials for transcription and extraction
+- Optional: PageIndex credentials for document context
+- Optional: FFmpeg, a Hugging Face token, and accepted pyannote model licenses for audio diarization
 
----
+### 1. Database
 
-### 2. Backend Installation (FastAPI)
+Apply the SQL files in `supabase/migrations/` to a development Supabase project in filename order. They create the initial tables and later authentication, review, audit, medication, follow up, and summary features. `supabase/full_migration.sql` is an initial consolidated schema with demo data; it does **not** include every later migration. Use synthetic patient records for evaluation.
 
-1. Open your terminal and navigate to the backend directory:
-   ```bash
-   cd backend
-   ```
-2. Create and activate a virtual environment:
-   ```bash
-   # Windows (Command Prompt)
-   python -m venv venv
-   venv\Scripts\activate
+### 2. Backend
 
-   # Windows (Powershell / Miniconda)
-   conda create -n dentalscribe python=3.10
-   conda activate dentalscribe
-   ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Copy the environment template and configure your secrets:
-   ```bash
-   cp .env.example .env
-   ```
-   Open `.env` and fill in:
-   - `DATABASE_URL` (Supabase Transaction Pooler URL)
-   - `GROQ_API_KEY` (Get from [Groq Console](https://console.groq.com/))
-   - `PAGEINDEX_API_KEY` & `PAGEINDEX_DOC_ID` (Get from [PageIndex](https://dash.pageindex.ai/))
-5. Launch the backend development server:
-   ```bash
-   uvicorn app.main:app --reload
-   ```
-   *The backend will run on [http://localhost:8000](http://localhost:8000). Interactive OpenAPI documentation is accessible at [http://localhost:8000/docs](http://localhost:8000/docs).*
-
----
-
-### 3. Frontend Installation (Next.js)
-
-1. Navigate to the frontend directory:
-   ```bash
-   cd ../frontend
-   ```
-2. Install Node modules:
-   ```bash
-   npm install
-   ```
-3. Copy environment template and verify your API route:
-   ```bash
-   cp .env.local .env.local
-   ```
-   Ensure `NEXT_PUBLIC_API_URL` is pointing to your backend endpoint (default is `http://localhost:8000/api/v1`).
-4. Launch the frontend development server:
-   ```bash
-   npm run dev
-   ```
-   *The client will run on [http://localhost:3000](http://localhost:3000).*
-
----
-
-## 🧪 Running Tests
-
-### Frontend (Vitest)
-A rigorous, stateful test suite validates user flows, forms, pocket limits, citation highlighting, billing code calculations, settings log modals, and global search.
-
-To execute the test suite:
-```bash
-cd frontend
-npm run test
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+uvicorn app.main:app --reload
 ```
 
-### Production Build Verification
-To ensure all TypeScript typings and Next.js static pages optimize successfully:
-```bash
+Edit `backend/.env` before starting:
+
+| Variable | Purpose |
+| --- | --- |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY` | Supabase project and Auth |
+| `DATABASE_URL` | PostgreSQL connection |
+| `GROQ_API_KEY` | Speech and language model processing |
+| `ALLOWED_ORIGINS` | Allowed browser origins |
+| `PAGEINDEX_API_KEY`, `PAGEINDEX_DOC_ID` | Optional document context |
+| `HF_TOKEN` | Optional diarization |
+
+The API runs at `http://localhost:8000`. Check `/health` for service status and `/docs` for interactive API documentation. The app can start without a database connection, but patient workflows require Supabase.
+
+### 3. Frontend
+
+Create `frontend/.env.local`:
+
+```dotenv
+NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_ANON_KEY
+```
+
+```powershell
 cd frontend
+npm ci
+npm run dev
+```
+
+Open `http://localhost:3000`. The root page provides sign in and registration; authenticated users continue to `/dashboard`.
+
+### Optional speaker diarization
+
+Install FFmpeg on the backend host and make it available on `PATH`. Provide `HF_TOKEN` with access to the pyannote models described in `backend/requirements.txt`. `SPEAKER_LABELING_MODE` supports `audio`, `text`, and `off`; audio mode can fall back to text labeling.
+
+## Main screens and API
+
+| Screen | Purpose |
+| --- | --- |
+| `/` | Authentication |
+| `/dashboard` | Practice overview and review tasks |
+| `/dashboard/patients`, `/dashboard/patients/[id]` | Patient directory and history |
+| `/dashboard/recording`, `/dashboard/processing` | Capture/upload and processing |
+| `/dashboard/chart` | Transcript, evidence, chart, notes and review |
+| `/dashboard/billing` | Procedure confirmation and billing |
+| `/dashboard/settings` | Profile, settings and audit views |
+| `/review` | Standalone transcript and citation workspace |
+
+The API is served under `/api/v1`. Route groups are `/auth`, `/patients`, `/transcription`, `/notes`, `/review`, `/workflow`, and `/audit-logs`. Use `/docs` for request schemas and endpoint details.
+
+## Quality checks
+
+```powershell
+cd frontend
+npm run test
+npm run lint
 npm run build
 ```
 
----
-
-## 🐳 Docker Deployment
-
-To build and run both the Next.js frontend and FastAPI backend inside a unified environment:
-```bash
-docker-compose up --build
+```powershell
+cd backend
+pytest
 ```
-- Frontend UI is accessible at [http://localhost:3000](http://localhost:3000)
-- Backend Swagger docs are accessible at [http://localhost:8000/docs](http://localhost:8000/docs)
+
+Frontend tests cover authentication, patients, dashboard, settings, and navigation. Backend tests cover authentication, practice scoping, sessions, audit logs, review access, extraction validation, long transcript chunking, and speaker labeling. Some backend integration tests use a real development Supabase project and create temporary accounts; configure test credentials before running the full suite.
+
+## Deployment and handoff
+
+- `backend/render.yaml` defines a Render Python service and `/health` check. `backend/Dockerfile` is an alternative backend container build.
+- Deploy the frontend to Vercel with `frontend/` as project root. Set the three `NEXT_PUBLIC_*` variables above, using the deployed API URL.
+- Configure `ALLOWED_ORIGINS` for the frontend and apply all migrations before evaluating patient workflows.
+- `docker-compose.yml` outlines both services, but the repository does not include a `frontend/Dockerfile`; its frontend service needs that file before building as written.
+- Seed SQL and sample assets are for demonstration. Keep real patient data, live credentials, and local database files out of evaluation material.
+- `docs/DEPLOY.md` and `docs/COMMANDS.md` contain historical setup notes; verify their route and variable examples against current code.
+
+## Internship deliverable
+
+This prototype demonstrates an end to end clinical documentation workflow: browser based recording and review, authenticated APIs, asynchronous audio processing, evidence grounded extraction, relational persistence, procedure review, and automated tests. It aims to reduce documentation effort while keeping the clinician responsible for clinical and billing decisions.
